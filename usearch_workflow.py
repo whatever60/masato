@@ -1,4 +1,4 @@
-#!python3
+#!/usr/bin/env python
 
 import argparse
 import glob
@@ -13,9 +13,10 @@ from tqdm.auto import tqdm
 
 
 def merge_pairs(
-    fastq_dir: str, output_dir: str, num_threads: int, backend: str = "vsearch"
+    fastq_dir: str, fastq_out: str, num_threads: int, backend: str = "vsearch"
 ) -> None:
     # merge paired end reads
+    output_dir = os.path.dirname(fastq_out)
     os.makedirs(output_dir, exist_ok=True)
     if backend == "usearch":
         subprocess.run(
@@ -37,22 +38,46 @@ def merge_pairs(
         os.makedirs(f"{output_dir}/temp", exist_ok=True)
         fs = []
         ps = []
-        for f in os.listdir(fastq_dir):
-            if f.endswith(".fastq"):
-                sample_name = f.split("_")[0]
-                # use Popen for non-blocking execution
-                outfile = open(f"{output_dir}/temp/{f}", "w")
-                process = subprocess.Popen(
-                    [
-                        "seqtk",
-                        "rename",
-                        f"{fastq_dir}/{f}",
-                        f"sample={sample_name} ",
-                    ],
-                    stdout=outfile,
-                )
-                fs.append(outfile)
-                ps.append(process)
+
+        # `fastq_dir` could be a path regex so that we can easily do merging for a
+        # subset of samples in a directory.
+        if os.path.isdir(fastq_dir):
+            files = sorted(glob.glob(f"{fastq_dir}/*.fastq"))
+            if not files:
+                raise ValueError(f"No fastq files found in {fastq_dir}")
+        else:
+            files = [i for i in sorted(glob.glob(fastq_dir)) if i.endswith(".fastq")]
+            if not files:
+                raise ValueError(f"No fastq files found matching {fastq_dir}")
+        if not all(f.endswith("_R1.fastq") or f.endswith("_R2.fastq") for f in files):
+            raise ValueError(
+                "Make sure to rename all fastq files of interest to end with _R1.fastq or _R2.fastq"
+            )
+        non_pair_files = []
+        for f in files:
+            if f.endswith("_R1.fastq"):
+                if f"{f[:-9]}_R2.fastq" not in files:
+                    non_pair_files.append(f)
+            elif f.endswith("_R2.fastq"):
+                if f"{f[:-9]}_R1.fastq" not in files:
+                    non_pair_files.append(f)
+        if non_pair_files:
+            raise ValueError(
+                f"Make sure that each sample has both _R1.fastq and _R2.fastq files. "
+                f"The following files are not paired: {non_pair_files}"
+            )
+
+        for f in files:
+            f_base = os.path.basename(f)
+            sample_name = f_base.split("_")[0]
+            # use Popen for non-blocking execution
+            outfile = open(f"{output_dir}/temp/{f_base}", "w")
+            process = subprocess.Popen(
+                ["seqtk", "rename", f, f"sample={sample_name} "],
+                stdout=outfile,
+            )
+            fs.append(outfile)
+            ps.append(process)
         [p.wait() for p in ps]
         [f.close() for f in fs]
 
@@ -70,9 +95,9 @@ def merge_pairs(
                 "--reverse",
                 f"{output_dir}/temp_R2.fastq",
                 "--fastqout",
-                f"{output_dir}/merged.fastq",
-                "--fastaout",
-                f"{output_dir}/merged.fa",
+                fastq_out,
+                # "--fastaout",
+                # f"{output_dir}/merged.fa",
                 "--fastq_maxdiffs",
                 "25",
                 "--fastq_minovlen",
@@ -89,7 +114,7 @@ def merge_pairs(
 def qc(
     input_fastq: str, num_splits: int, num_threads: int = 16, backend="vsearch"
 ) -> None:
-    output_fastq = os.path.splitext(input_fastq)[0] + ".filtered.fa"
+    output_fasta = os.path.splitext(input_fastq)[0] + ".filtered.fa"
 
     if backend == "usearch":
         # Split the merged FASTQ file into multiple pieces
@@ -110,7 +135,7 @@ def qc(
             )
 
             # Perform QC on each split FASTQ file
-            with open(output_fastq, "w") as outfile:
+            with open(output_fasta, "w") as outfile:
                 for split_file in glob.glob(os.path.join(base_dir, "_split_*.fastq")):
                     subprocess.run(
                         [
@@ -140,7 +165,7 @@ def qc(
                     "-fastq_filter",
                     input_fastq,
                     "-fastaout",
-                    output_fastq,
+                    output_fasta,
                     "-fastq_maxee",
                     "0.5",
                     "-fastq_minlen",
@@ -161,7 +186,7 @@ def qc(
                 "--fastq_filter",
                 input_fastq,
                 "--fastaout",
-                output_fastq,
+                output_fasta,
                 "--fastq_maxee",
                 "0.5",
                 "--fastq_minlen",
@@ -170,8 +195,8 @@ def qc(
                 "0",
                 "--relabel",
                 "filtered",
-                "--threads",
-                str(num_threads),
+                # "--threads",
+                # str(num_threads),
             ]
         )
 
@@ -207,7 +232,7 @@ def add_depth_to_metadata(fastq_dir: str, metadata_path: str) -> None:
     #         sample_name = f.replace("_R1.fastq", "")
     #         count = sum(1 for line in open(os.path.join(fastq_dir, f))) / 4
     #         data.append([sample_name, count])
-    command = "seqkit stats input_fastqs/*_R1.fastq -T"
+    command = f"seqkit stats {fastq_dir}/*_R1.fastq -T"
     result = subprocess.run(command, capture_output=True, text=True, shell=True)
 
     # Check if the command was successful
@@ -256,6 +281,7 @@ def subsample(
     num_subsamples: int,
     mode: str,
     seed: int = 100,
+    metadata_only: bool = False,
 ) -> None:
     # Load the metadata CSV file into a pandas DataFrame
     df_meta = pd.read_table(metadata_path, index_col="sample")
@@ -281,9 +307,19 @@ def subsample(
         del row["read_count_subsample"], row["read_count"]
         ps = []
         for iteration in range(1, num_subs + 1):
+            # Subsample R1 and R1 and output to the subsampled directory
+            subsample_metadata.append(
+                {
+                    "sample": f"{sample_name}-subsampled-{iteration}",
+                    "original_sample": sample_name,
+                    "read_count": read_count,
+                }
+                | row.to_dict()
+            )
+            if metadata_only:
+                continue
             # Increment the seed value
             seed += 1
-            # Subsample R1 and R1 and output to the subsampled directory
             for suffix in ["_R1.fastq", "_R2.fastq"]:
                 fastq_file = os.path.join(fastq_dir, f"{sample_name}{suffix}")
                 if not os.path.isfile(fastq_file):
@@ -308,20 +344,12 @@ def subsample(
                     stderr=subprocess.DEVNULL,
                 )
                 ps.append(p)
-            subsample_metadata.append(
-                {
-                    "sample": f"{sample_name}-subsampled-{iteration}",
-                    "original_sample": sample_name,
-                    "read_count": read_count,
-                }
-                | row.to_dict()
-            )
         [p.wait() for p in ps]
     pd.DataFrame(subsample_metadata).to_csv(output_metadata_path, sep="\t", index=False)
 
 
-def db_construct(input_fasta, num_threads: int, backend: str = "vsearch"):
-    output_dir, base_name = os.path.split(input_fasta)
+def db_construct(input_fastx, num_threads: int, backend: str = "vsearch"):
+    output_dir, base_name = os.path.split(input_fastx)
     base_name_noext = os.path.splitext(base_name)[0]
 
     if backend == "usearch":
@@ -329,7 +357,7 @@ def db_construct(input_fasta, num_threads: int, backend: str = "vsearch"):
             [
                 "usearch11",
                 "-fastx_uniques",
-                input_fasta,
+                input_fastx,
                 "-fastaout",
                 f"{output_dir}/{base_name_noext}.uniq.fa",
                 "-sizeout",
@@ -352,7 +380,7 @@ def db_construct(input_fasta, num_threads: int, backend: str = "vsearch"):
             [
                 "usearch11",
                 "-search_exact",
-                input_fasta,
+                input_fastx,
                 "-db",
                 f"{output_dir}/{base_name_noext}.sorted.fa",
                 "-strand",
@@ -369,39 +397,39 @@ def db_construct(input_fasta, num_threads: int, backend: str = "vsearch"):
             [
                 "vsearch",
                 "--fastx_unique",
-                input_fasta,
+                input_fastx,
                 "--fastaout",
                 f"{output_dir}/{base_name_noext}.uniq.fa",
                 "--sizeout",
             ]
         )
-        subprocess.run(
-            [
-                "vsearch",
-                "--sortbysize",
-                f"{output_dir}/{base_name_noext}.uniq.fa",
-                "--output",
-                f"{output_dir}/{base_name_noext}.sorted.fa",
-                # subsequent clustering/denoising will apply threshold, so not necessary to do it here.
-                # "--minsize",
-                # "2",
-            ]
-        )
-        subprocess.run(
-            [
-                "vsearch",
-                "--search_exact",
-                input_fasta,
-                "--db",
-                f"{output_dir}/{base_name_noext}.sorted.fa",
-                "--strand",
-                "both",
-                "--notmatched",
-                f"{output_dir}/{base_name_noext}.unmatched.fa",
-                "--threads",
-                str(num_threads),
-            ]
-        )
+        # subprocess.run(
+        #     [
+        #         "vsearch",
+        #         "--sortbysize",
+        #         f"{output_dir}/{base_name_noext}.uniq.fa",
+        #         "--output",
+        #         f"{output_dir}/{base_name_noext}.sorted.fa",
+        #         # subsequent clustering/denoising will apply threshold, so not necessary to do it here.
+        #         # "--minsize",
+        #         # "2",
+        #     ]
+        # )
+        # subprocess.run(
+        #     [
+        #         "vsearch",
+        #         "--search_exact",
+        #         input_fastx,
+        #         "--db",
+        #         f"{output_dir}/{base_name_noext}.sorted.fa",
+        #         "--strand",
+        #         "both",
+        #         "--notmatched",
+        #         f"{output_dir}/{base_name_noext}.unmatched.fa",
+        #         "--threads",
+        #         str(num_threads),
+        #     ]
+        # )
 
 
 def cluster_uparse(
@@ -588,7 +616,7 @@ def cluster_unoise3(
         # vsearch does not have `--otutab`, `--otutab_stats`, `--calc_distmx`, and
         # `--cluster_aggd`. As suggested on the github issue
         #  (https://github.com/torognes/vsearch/issues/392), we use `--search_global`
-        # instead, but the other commands are not implemented.
+        # to replace `--otutab`, but the other commands are not implemented.
         # Besides, in usearch chimera is removed as part of the clustering step, but
         # in vsearch chimera removal is a separate step.
         subprocess.run(
@@ -767,6 +795,9 @@ def main():
     subsample_parser.add_argument(
         "-s", "--seed", type=int, default=100, help="Random seed"
     )
+    subsample_parser.add_argument(
+        "--metadata_only", action="store_true", help="Only generate metadata"
+    )
 
     merge_pairs_parser = subparsers.add_parser(
         "merge_pairs", help="Merge paired-end reads"
@@ -775,7 +806,7 @@ def main():
         "-i", "--fastq_dir", help="Input directory containing paired-end fastq files"
     )
     merge_pairs_parser.add_argument(
-        "-o", "--output_dir", help="Output directory for merged fastq file"
+        "-o", "--fastq_out", help="Output path for merged fastq file"
     )
     merge_pairs_parser.add_argument(
         "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
@@ -883,9 +914,10 @@ def main():
             args.num_subsamples,
             args.mode,
             args.seed,
+            args.metadata_only,
         )
     elif args.subcommand == "merge_pairs":
-        merge_pairs(args.fastq_dir, args.output_dir, args.num_threads)
+        merge_pairs(args.fastq_dir, args.fastq_out, args.num_threads)
     # elif args.subcommand == "qc":
     #     qc(args.input_fastq, args.num_splits, args.num_threads)
     elif args.subcommand == "db_construct":

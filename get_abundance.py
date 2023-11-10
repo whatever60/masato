@@ -1,4 +1,4 @@
-#!python3
+#!/usr/bin/env python3
 """
 Take a OTU count table, sample metadata, and OTU taxonomy table as input, output 
 tables of relative/absolute abundance at OTU level and relative abundance at 
@@ -23,7 +23,7 @@ Note that rows of OTU abundance tables are sample, while rows of genus/family ab
 tables are groups.
 
 Example run:
-python3 scripts/get_abundance.py \
+get_abundance.py \
   --otu_count_tsv_path outputs_unoise3/unoise3_zotu.tsv \
   --metadata_path metadatas/all.tsv \
   --otu_taxonomy_path outputs_unoise3/unoise3_zotu_rrndb_processed.tsv \
@@ -70,6 +70,7 @@ def _calc_norm_factor(
 
     A new metadata dataframe will be returned.
     """
+
     def compute_spikein_and_norm(row: pd.Series) -> pd.Series:
         otu_count_series = df_otu_count.loc[row.name]
 
@@ -210,9 +211,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t", "--otu_taxonomy_path", required=True, help="Path to OTU taxonomy tsv."
     )
-    parser.add_argument(
-        "-s", "--spikein_taxa_key", type=str, default=None
-    )
+    parser.add_argument("-s", "--spikein_taxa_key", type=str, default=None)
     parser.add_argument("-w", "--sample_weight_key", default=None, type=str)
     parser.add_argument("-r", "--rep_group_key", default=None, type=str)
     parser.add_argument(
@@ -265,7 +264,9 @@ if __name__ == "__main__":
     spikein2otus = {
         spikein: _find_otus_by_taxon(df_tax, spikein) for spikein in all_spikeins
     }
-    all_spikein_otus = list(set([otu for otus in spikein2otus.values() for otu in otus]))
+    all_spikein_otus = list(
+        set([otu for otus in spikein2otus.values() for otu in otus])
+    )
     df_meta = _calc_norm_factor(
         df_otu_count,
         df_tax,
@@ -277,13 +278,11 @@ if __name__ == "__main__":
     df_otu_count = df_otu_count.drop(all_spikein_otus, axis=1)
     df_otu_abs_ab = df_otu_count.div(df_meta.norm_factor, axis=0)
     df_otu_rel_ab = df_otu_count.div(df_otu_count.sum(axis=1), axis=0)
+    df_otu_rel_ab_g = _agg_along_axis(df_otu_rel_ab, df_meta[rep_group_key], axis=0)
 
     df_meta.to_csv(f"{output_dir}/metadata_sample.csv")
+    df_otu_count.to_csv(f"{output_dir}/count_sample_otu.csv")
     df_otu_abs_ab.to_csv(f"{output_dir}/abs_ab_sample_otu.csv")
-    df_otu_rel_ab.to_csv(f"{output_dir}/rel_ab_sample_otu.csv")
-    # _calc_alpha_metrics(df_otu_rel_ab).to_csv(f"{output_dir}/metadata_sample_otu.csv")
-
-    df_otu_rel_ab_g = _agg_along_axis(df_otu_rel_ab, df_meta[rep_group_key], axis=0)
 
     df_tax["otu"] = df_tax.index
     if len(rel_ab_thresholds) == 1:
@@ -295,8 +294,17 @@ if __name__ == "__main__":
             keep_others,
             keep_unknown,
         )
+        df_tax_rel_ab = _taxa_qc(
+            _agg_along_axis(df_otu_rel_ab, df_tax[level], axis=1),
+            rel_ab_thres,
+            keep_others,
+            keep_unknown,
+        )
         # absolute abundance is only for OTU level
         df_tax_rel_ab_g.to_csv(f"{output_dir}/rel_ab_group_{level}.csv")
+        df_tax_rel_ab.loc[df_meta.index].to_csv(
+            f"{output_dir}/rel_ab_sample_{level}.csv"
+        )
         # _calc_alpha_metrics(df_tax_rel_ab_g).drop("chao1", axis=1).to_csv(
         #     f"{output_dir}/metadata_group_{level}.csv"
         # )
