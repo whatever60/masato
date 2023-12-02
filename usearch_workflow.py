@@ -78,7 +78,7 @@ def merge_pairs(
             )
             fs.append(outfile)
             ps.append(process)
-        [p.wait() for p in ps]
+        [p.wait() for p in tqdm(ps)]
         [f.close() for f in fs]
 
         subprocess.run(
@@ -259,13 +259,13 @@ def add_depth_to_metadata(fastq_dir: str, metadata_path: str) -> None:
     # are not in the metadata (these samples will be ignored)
     extra_samples = df_rc.index.difference(df.index)
     if len(extra_samples) > 0:
-        raise ValueError(
-            f"These samples in the fastq directory are not present in the metadata: {extra_samples}"
+        print(
+            f"WARNING: These samples in the fastq directory are not present in the metadata: {extra_samples}"
         )
     extra_samples = df.index.difference(df_rc.index)
     if len(extra_samples) > 0:
-        print(
-            f"WARNING: These samples in the metadata are not present in the fastq directory: {extra_samples}"
+        raise ValueError(
+            f"These samples in the metadata are not present in the fastq directory: {extra_samples}"
         )
     else:
         print("Great! All samples in the metadata are present in the fastq directory.")
@@ -506,9 +506,82 @@ def cluster_uparse(
     )
 
 
-def cluster_unoise3(
+def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
+    if os.path.isdir(out_fasta):
+        raise ValueError(f"Output fasta file {out_fasta} is a directory")
+    output_dir = os.path.dirname(out_fasta)
+    os.makedirs(output_dir, exist_ok=True)
+    # vsearch does not have `--otutab`, `--otutab_stats`, `--calc_distmx`, and
+    # `--cluster_aggd`. As suggested on the github issue
+    #  (https://github.com/torognes/vsearch/issues/392), we use `--search_global`
+    # to replace `--otutab`, but the other commands are not implemented.
+    # Besides, in usearch chimera is removed as part of the clustering step, but
+    # in vsearch chimera removal is a separate step.
+    subprocess.run(
+        [
+            "vsearch",
+            "--cluster_unoise",
+            uniq_fasta,
+            "--minsize",
+            str(minsize),
+            "--centroids",
+            f"{output_dir}/temp.fa",
+            "--strand",
+            "both",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "vsearch",
+            "--uchime3_denovo",
+            f"{output_dir}/temp.fa",
+            "--nonchimeras",
+            out_fasta,
+            "--relabel",
+            "ZOTU",
+        ],
+    )
+    os.remove(f"{output_dir}/temp.fa")
+
+
+def search_global(input_fastq: str, zotu_fasta: str, num_threads: int, id_: float):
+    output_dir = os.path.dirname(input_fastq)
+    with open(f"{os.path.splitext(input_fastq)[0]}.fa", "w") as f:
+        subprocess.run(["seqtk", "seq", "-A", input_fastq], stdout=f, check=True)
+    subprocess.run(
+        [
+            "vsearch",
+            "--usearch_global",
+            f"{os.path.splitext(input_fastq)[0]}.fa",
+            "--db",
+            zotu_fasta,
+            "--strand",
+            "plus",
+            "--id",
+            str(id_),
+            "--otutabout",
+            f"{output_dir}/unoise3_zotu.tsv",
+            "--biomout",
+            f"{output_dir}/unoise3_zotu.biom",
+            "--alnout",
+            f"{output_dir}/unoise3_zotu.aln",
+            "--dbmatched",
+            f"{output_dir}/unoise3_zotu_dbmatched.fa",
+            "--dbnotmatched",
+            f"{output_dir}/unoise3_zotu_dbnotmatched.fa",
+            "--sizeout",
+            "--threads",
+            str(num_threads),
+        ]
+    )
+
+
+def _cluster_unoise3(
     input_fastq: str,
     db_fasta: str,
+    minsize: int,
+    id_: float,
     output_dir: str,
     num_threads: int,
     backend="vsearch",
@@ -624,6 +697,8 @@ def cluster_unoise3(
                 "vsearch",
                 "--cluster_unoise",
                 db_fasta,
+                "--minsize",
+                str(minsize),
                 "--centroids",
                 f"{output_dir}/temp.fa",
                 "--strand",
@@ -656,7 +731,7 @@ def cluster_unoise3(
                 "--strand",
                 "plus",
                 "--id",
-                "0.97",
+                str(id_),
                 "--otutabout",
                 f"{output_dir}/unoise3_zotu.tsv",
                 "--biomout",
@@ -853,20 +928,45 @@ def main():
         "cluster_unoise3", help="Cluster reads using UNOISE3"
     )
     cluster_unoise3_parser.add_argument(
-        "-i", "--input_fastq", help="Input FASTQ file to cluster", type=str
+        "-i", "--uniq_fasta", help="Input FASTQ file to cluster", type=str
     )
     cluster_unoise3_parser.add_argument(
-        "-d", "--db_fasta", help="Input FASTA file to cluster against", type=str
+        "-m", "--minsize", type=int, default=8, help="Minimum cluster size"
     )
     cluster_unoise3_parser.add_argument(
-        "-o",
-        "--output_dir",
-        help="Output directory for UNOISE3 results",
-        type=str,
-        default=None,
+        "-o", "--out_fasta", help="Output path for ZOTU fasta file"
     )
-    cluster_unoise3_parser.add_argument(
-        "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
+    # cluster_unoise3_parser.add_argument(
+    #     "-d", "--db_fasta", help="Input FASTA file to cluster against", type=str
+    # )
+    # cluster_unoise3_parser.add_argument(
+    #     "--id", type=float, default=0.97, help="Minimum cluster identity"
+    # )
+    # cluster_unoise3_parser.add_argument(
+    #     "-o",
+    #     "--output_dir",
+    #     help="Output directory for UNOISE3 results",
+    #     type=str,
+    #     default=None,
+    # )
+    # cluster_unoise3_parser.add_argument(
+    #     "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
+    # )
+
+    search_global_parser = subparsers.add_parser(
+        "search_global", help="Search reads against a database"
+    )
+    search_global_parser.add_argument(
+        "-i", "--input_fastq", help="Input FASTQ file to search", type=str
+    )
+    search_global_parser.add_argument(
+        "-d", "--zotu_fasta", help="Input FASTA file to search against", type=str
+    )
+    search_global_parser.add_argument(
+        "--id", type=float, default=0.97, help="Minimum cluster identity"
+    )
+    search_global_parser.add_argument(
+        "-t", "--num_threads", type=int, default=8, help="Number of threads to use"
     )
 
     tax_nbc_parser = subparsers.add_parser(
@@ -930,9 +1030,9 @@ def main():
             args.input_fastq, args.db_fasta, args.output_dir, args.num_threads
         )
     elif args.subcommand == "cluster_unoise3":
-        cluster_unoise3(
-            args.input_fastq, args.db_fasta, args.output_dir, args.num_threads
-        )
+        cluster_unoise3(args.uniq_fasta, args.minsize, args.out_fasta)
+    elif args.subcommand == "search_global":
+        search_global(args.input_fastq, args.zotu_fasta, args.id, args.num_threads)
     elif args.subcommand == "tax_nbc":
         tax_nbc(args.input_fasta, args.db_fasta, args.output_path, args.num_threads)
     elif args.subcommand == "tax_sintax":

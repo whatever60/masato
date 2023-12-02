@@ -211,9 +211,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t", "--otu_taxonomy_path", required=True, help="Path to OTU taxonomy tsv."
     )
-    parser.add_argument("-s", "--spikein_taxa_key", type=str, default=None)
+    parser.add_argument("-s", "--spikein_taxa_key", type=str, default="spike_in")
+    parser.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser.add_argument("-w", "--sample_weight_key", default=None, type=str)
-    parser.add_argument("-r", "--rep_group_key", default=None, type=str)
     parser.add_argument(
         "-o", "--output_dir", required=True, help="Directory to save the outputs."
     )
@@ -253,14 +253,37 @@ if __name__ == "__main__":
     # read inputs
     df_meta = pd.read_table(metadata_path, index_col="sample")
     df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
-    df_otu_count = pd.read_table(count_tsv_path, index_col="#OTU ID")[df_meta.index].T
+    df_otu_count = pd.read_table(count_tsv_path, index_col="#OTU ID")
+    # add missing samples with all zero counts
+    missing_samples = list(set(df_meta.index) - set(df_otu_count.columns))
+    if missing_samples:
+        print("WARNING: The following samples are missing from OTU count table:")
+        print("\t", end="")
+        print(*sorted(missing_samples), sep="\n\t")
+        print("Filling in missing samples with all zero counts.")
+        df_otu_count = pd.concat(
+            [
+                df_otu_count,
+                pd.DataFrame(0, index=df_otu_count.index, columns=missing_samples),
+            ],
+            axis=1,
+        )
+    df_otu_count = df_otu_count[df_meta.index].T
     common_otus = list(set(df_otu_count.columns).intersection(df_tax.index))
     df_otu_count = df_otu_count.loc[:, common_otus]
     df_tax = df_tax.loc[common_otus]
 
-    all_spikeins = (
-        df_meta[spikein_taxa_key].dropna().str.split(",").explode().unique().tolist()
-    )
+    try:
+        all_spikeins = (
+            df_meta[spikein_taxa_key]
+            .dropna()
+            .str.split(",")
+            .explode()
+            .unique()
+            .tolist()
+        )
+    except AttributeError:  # happens when all spikein_taxa_key are NaN
+        all_spikeins = []
     spikein2otus = {
         spikein: _find_otus_by_taxon(df_tax, spikein) for spikein in all_spikeins
     }

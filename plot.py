@@ -8,8 +8,12 @@ from skbio.diversity.alpha import chao1, shannon, simpson
 from skbio.diversity import beta_diversity
 from skbio.stats.ordination import pcoa
 import seaborn as sns
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator
+
+
+matplotlib.use("TkAgg")
 
 
 def _get_color_palette(
@@ -34,6 +38,21 @@ def _stacked_bar(
     axs: list[plt.Axes],
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
+        # df = df.copy()
+        # index = []
+        # for i in df.index:
+        #     if i.endswith("-Swab-combined"):
+        #         index.append(i[1] + "-Bulk")
+        #     elif i.endswith("-Scrape-R2A"):
+        #         index.append(i[1] + "-Plate-R2A")
+        #     elif i.endswith("-Scrape-TSA"):
+        #         index.append(i[1] + "-Plate-TSA")
+        #     else:
+        #         raise ValueError(f"Unknown column: {i}")
+        # df.index = index
+
+        # df.index = [i for i in df.index]
+
         df.plot(kind="bar", stacked=True, color=palette, ax=ax)
         ax.set_xlabel("")
         ax.set_ylabel("Relative abundance")
@@ -46,7 +65,6 @@ def _stacked_bar(
         else:
             ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
             ax.get_legend().set_title(title)
-
         ax.set_ylabel(ax.yaxis.get_label().get_text(), fontsize=14)
         ax.set_xlabel(ax.xaxis.get_label().get_text(), fontsize=14)
 
@@ -60,6 +78,19 @@ def _heatmap(
     cmap: str,
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
+        # df = df.copy()
+        # columns = []
+        # for i in df.columns:
+        #     if i.endswith("-Swab-combined"):
+        #         columns.append(i[1] + "-Bulk")
+        #     elif i.endswith("-Scrape-R2A"):
+        #         columns.append(i[1] + "-Plate-R2A")
+        #     elif i.endswith("-Scrape-TSA"):
+        #         columns.append(i[1] + "-Plate-TSA")
+        #     else:
+        #         raise ValueError(f"Unknown column: {i}")
+        # df.columns = columns
+
         if i == len(axs) - 1:
             cbar_ax = fig.add_axes(
                 [
@@ -107,6 +138,19 @@ def _barplot_with_whisker_strip(
     ylog: bool = False,
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
+        # df = df.copy()
+        # index = []
+        # for j in df[group_key]:
+        #     if j.endswith("-Swab-combined"):
+        #         index.append(j[1] + "-Bulk")
+        #     elif j.endswith("-Scrape-R2A"):
+        #         index.append(j[1] + "-Plate-R2A")
+        #     elif j.endswith("-Scrape-TSA"):
+        #         index.append(j[1] + "-Plate-TSA")
+        #     else:
+        #         raise ValueError(f"Unknown column: {j}")
+        # df[group_key] = index
+
         group = df.groupby(group_key, sort=False)
         # Determine which groups have more than one sample
         groups_with_multiple_samples = group.filter(lambda x: len(x) > 1)[
@@ -116,14 +160,12 @@ def _barplot_with_whisker_strip(
         # assign different colors depending on if group.groups.keys() have "old", "reamplify", or "Scrape"
         colors = []
         for key in group.groups.keys():
-            if "old" in key:
+            if key.endswith("-Bulk"):
                 colors.append("tab:blue")
-            elif "reamplify" in key:
+            elif key.endswith("-Plate-R2A"):
                 colors.append("tab:orange")
-            elif "Scrape" in key:
+            elif key.endswith("-Plate-TSA"):
                 colors.append("tab:green")
-            elif "comb" in key:
-                colors.append("tab:red")
             else:
                 raise ValueError(f"Unknown group: {key}")
 
@@ -290,7 +332,7 @@ if __name__ == "__main__":
                     _stacked_bar(
                         res_group_list,
                         names,
-                        f"Taxonomy at {level} level",
+                        f"Taxonomy at {level if level != 'otu' else level.upper()} level",
                         custom_palette,
                         axs,
                     )
@@ -323,7 +365,7 @@ if __name__ == "__main__":
                             title=f"Taxonomy at {level} level",
                             cbar_label="log10(relative abundance + 1e-4)",
                             axs=axs,
-                            cmap="coolwarm",
+                            cmap="rocket_r",
                         )
                         fig.subplots_adjust(wspace=wspace)
                         fig.savefig(
@@ -368,9 +410,7 @@ if __name__ == "__main__":
             plot_strip = args.plot_strip
 
             for level in tax_levels:
-                res = pd.read_csv(
-                    f"{abs_ab_dir}/count_sample_{level}.csv", index_col=0
-                )
+                res = pd.read_csv(f"{abs_ab_dir}/count_sample_{level}.csv", index_col=0)
                 meta_l = pd.merge(
                     meta, _calc_alpha_metrics(res), left_on="sample", right_index=True
                 )
@@ -414,6 +454,7 @@ if __name__ == "__main__":
                     )
     elif args.command == "dm":
         from plot_dm import plot_dm
+
         plot_dm(
             args.input_ab,
             args.metadata,
