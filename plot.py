@@ -39,18 +39,18 @@ def _stacked_bar(
     axs: list[plt.Axes],
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
-        df = df.copy()
-        index = []
-        for j in df.index:
-            if j.endswith("-Swab-combined"):
-                index.append(j[1] + "-Bulk")
-            elif j.endswith("-Scrape-R2A"):
-                index.append(j[1] + "-Plate-R2A")
-            elif j.endswith("-Scrape-TSA"):
-                index.append(j[1] + "-Plate-TSA")
-            else:
-                raise ValueError(f"Unknown column: {j}")
-        df.index = index
+        # df = df.copy()
+        # index = []
+        # for j in df.index:
+        #     if j.endswith("-Swab-combined"):
+        #         index.append(j[1] + "-Bulk")
+        #     elif j.endswith("-Scrape-R2A"):
+        #         index.append(j[1] + "-Plate-R2A")
+        #     elif j.endswith("-Scrape-TSA"):
+        #         index.append(j[1] + "-Plate-TSA")
+        #     else:
+        #         raise ValueError(f"Unknown column: {j}")
+        # df.index = index
 
         df.plot(kind="bar", stacked=True, color=palette, ax=ax)
         ax.set_xlabel("")
@@ -77,18 +77,18 @@ def _heatmap(
     cmap: str,
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
-        df = df.copy()
-        columns = []
-        for j in df.columns:
-            if j.endswith("-Swab-combined"):
-                columns.append(j[1] + "-Bulk")
-            elif j.endswith("-Scrape-R2A"):
-                columns.append(j[1] + "-Plate-R2A")
-            elif j.endswith("-Scrape-TSA"):
-                columns.append(j[1] + "-Plate-TSA")
-            else:
-                raise ValueError(f"Unknown column: {j}")
-        df.columns = columns
+        # df = df.copy()
+        # columns = []
+        # for j in df.columns:
+        #     if j.endswith("-Swab-combined"):
+        #         columns.append(j[1] + "-Bulk")
+        #     elif j.endswith("-Scrape-R2A"):
+        #         columns.append(j[1] + "-Plate-R2A")
+        #     elif j.endswith("-Scrape-TSA"):
+        #         columns.append(j[1] + "-Plate-TSA")
+        #     else:
+        #         raise ValueError(f"Unknown column: {j}")
+        # df.columns = columns
 
         if i == len(axs) - 1:
             cbar_ax = fig.add_axes(
