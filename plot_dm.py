@@ -1,13 +1,17 @@
+import os
+
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 from skbio.diversity import beta_diversity
 from skbio.stats.ordination import pcoa
-
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import seaborn as sns
 
+
+# configure matplotlib PDF saving to use text instead of vector graphics
+plt.rcParams["pdf.fonttype"] = 42
 
 def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     meta = pd.read_csv(metadata_path, index_col=0)
@@ -177,3 +181,5 @@ def plot_dm(
 
     fig.tight_layout()
     fig.savefig(fig_path, dpi=300, bbox_inches="tight")
+    # also save a pdf file
+    fig.savefig(os.path.splitext(fig_path)[0] + ".pdf", bbox_inches="tight")

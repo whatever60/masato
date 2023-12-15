@@ -14,6 +14,7 @@ from matplotlib.ticker import FixedLocator
 
 
 matplotlib.use("TkAgg")
+plt.rcParams["pdf.fonttype"] = 42
 
 
 def _get_color_palette(
@@ -38,20 +39,18 @@ def _stacked_bar(
     axs: list[plt.Axes],
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
-        # df = df.copy()
-        # index = []
-        # for i in df.index:
-        #     if i.endswith("-Swab-combined"):
-        #         index.append(i[1] + "-Bulk")
-        #     elif i.endswith("-Scrape-R2A"):
-        #         index.append(i[1] + "-Plate-R2A")
-        #     elif i.endswith("-Scrape-TSA"):
-        #         index.append(i[1] + "-Plate-TSA")
-        #     else:
-        #         raise ValueError(f"Unknown column: {i}")
-        # df.index = index
-
-        # df.index = [i for i in df.index]
+        df = df.copy()
+        index = []
+        for j in df.index:
+            if j.endswith("-Swab-combined"):
+                index.append(j[1] + "-Bulk")
+            elif j.endswith("-Scrape-R2A"):
+                index.append(j[1] + "-Plate-R2A")
+            elif j.endswith("-Scrape-TSA"):
+                index.append(j[1] + "-Plate-TSA")
+            else:
+                raise ValueError(f"Unknown column: {j}")
+        df.index = index
 
         df.plot(kind="bar", stacked=True, color=palette, ax=ax)
         ax.set_xlabel("")
@@ -78,18 +77,18 @@ def _heatmap(
     cmap: str,
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
-        # df = df.copy()
-        # columns = []
-        # for i in df.columns:
-        #     if i.endswith("-Swab-combined"):
-        #         columns.append(i[1] + "-Bulk")
-        #     elif i.endswith("-Scrape-R2A"):
-        #         columns.append(i[1] + "-Plate-R2A")
-        #     elif i.endswith("-Scrape-TSA"):
-        #         columns.append(i[1] + "-Plate-TSA")
-        #     else:
-        #         raise ValueError(f"Unknown column: {i}")
-        # df.columns = columns
+        df = df.copy()
+        columns = []
+        for j in df.columns:
+            if j.endswith("-Swab-combined"):
+                columns.append(j[1] + "-Bulk")
+            elif j.endswith("-Scrape-R2A"):
+                columns.append(j[1] + "-Plate-R2A")
+            elif j.endswith("-Scrape-TSA"):
+                columns.append(j[1] + "-Plate-TSA")
+            else:
+                raise ValueError(f"Unknown column: {j}")
+        df.columns = columns
 
         if i == len(axs) - 1:
             cbar_ax = fig.add_axes(
@@ -138,18 +137,18 @@ def _barplot_with_whisker_strip(
     ylog: bool = False,
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
-        # df = df.copy()
-        # index = []
-        # for j in df[group_key]:
-        #     if j.endswith("-Swab-combined"):
-        #         index.append(j[1] + "-Bulk")
-        #     elif j.endswith("-Scrape-R2A"):
-        #         index.append(j[1] + "-Plate-R2A")
-        #     elif j.endswith("-Scrape-TSA"):
-        #         index.append(j[1] + "-Plate-TSA")
-        #     else:
-        #         raise ValueError(f"Unknown column: {j}")
-        # df[group_key] = index
+        df = df.copy()
+        index = []
+        for j in df[group_key]:
+            if j.endswith("-Swab-combined"):
+                index.append(j[1] + "-Bulk")
+            elif j.endswith("-Scrape-R2A"):
+                index.append(j[1] + "-Plate-R2A")
+            elif j.endswith("-Scrape-TSA"):
+                index.append(j[1] + "-Plate-TSA")
+            else:
+                raise ValueError(f"Unknown column: {j}")
+        df[group_key] = index
 
         group = df.groupby(group_key, sort=False)
         # Determine which groups have more than one sample
