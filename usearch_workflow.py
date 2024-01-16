@@ -9,6 +9,7 @@ import shutil
 
 import numpy as np
 import pandas as pd
+from Bio import SeqIO
 from tqdm.auto import tqdm
 
 
@@ -67,19 +68,22 @@ def merge_pairs(
                 f"The following files are not paired: {non_pair_files}"
             )
 
-        for f in files:
-            f_base = os.path.basename(f)
-            sample_name = f_base.split("_")[0]
-            # use Popen for non-blocking execution
-            outfile = open(f"{output_dir}/temp/{f_base}", "w")
-            process = subprocess.Popen(
-                ["seqtk", "rename", f, f"sample={sample_name} "],
-                stdout=outfile,
-            )
-            fs.append(outfile)
-            ps.append(process)
-        [p.wait() for p in tqdm(ps)]
-        [f.close() for f in fs]
+        batch = 1000
+        for i in range(0, len(files), batch):
+            file_list = files[i : i + batch]
+            for f in file_list:
+                f_base = os.path.basename(f)
+                sample_name = f_base.split("_")[0]
+                # use Popen for non-blocking execution
+                outfile = open(f"{output_dir}/temp/{f_base}", "w")
+                process = subprocess.Popen(
+                    ["seqtk", "rename", f, f"sample={sample_name} "],
+                    stdout=outfile,
+                )
+                fs.append(outfile)
+                ps.append(process)
+            [p.wait() for p in tqdm(ps)]
+            [f.close() for f in fs]
 
         subprocess.run(
             f"cat {output_dir}/temp/*_R1.fastq > {output_dir}/temp_R1.fastq", shell=True
@@ -113,8 +117,10 @@ def merge_pairs(
 
 def qc(
     input_fastq: str, num_splits: int, num_threads: int = 16, backend="vsearch"
-) -> None:
-    output_fasta = os.path.splitext(input_fastq)[0] + ".filtered.fa"
+) -> str:
+    output_dir = os.path.dirname(input_fastq)
+    filename = os.path.basename(input_fastq).split(".")[0]
+    output_fastx = os.path.join(output_dir, f"{filename}.filtered.fastq.gz")
 
     if backend == "usearch":
         # Split the merged FASTQ file into multiple pieces
@@ -135,7 +141,7 @@ def qc(
             )
 
             # Perform QC on each split FASTQ file
-            with open(output_fasta, "w") as outfile:
+            with open(output_fastx, "w") as outfile:
                 for split_file in glob.glob(os.path.join(base_dir, "_split_*.fastq")):
                     subprocess.run(
                         [
@@ -165,7 +171,7 @@ def qc(
                     "-fastq_filter",
                     input_fastq,
                     "-fastaout",
-                    output_fasta,
+                    output_fastx,
                     "-fastq_maxee",
                     "0.5",
                     "-fastq_minlen",
@@ -185,12 +191,12 @@ def qc(
                 "vsearch",
                 "--fastq_filter",
                 input_fastq,
-                "--fastaout",
-                output_fasta,
+                "--fastqout",
+                output_fastx,
                 "--fastq_maxee",
                 "0.5",
                 "--fastq_minlen",
-                "200",
+                "100",
                 "--fastq_maxns",
                 "0",
                 "--relabel",
@@ -199,6 +205,7 @@ def qc(
                 # str(num_threads),
             ]
         )
+    return output_fastx
 
 
 def split_fastq(args):
@@ -350,7 +357,7 @@ def subsample(
 
 def db_construct(input_fastx, num_threads: int, backend: str = "vsearch"):
     output_dir, base_name = os.path.split(input_fastx)
-    base_name_noext = os.path.splitext(base_name)[0]
+    base_name_noext = base_name.split(".")[0]
 
     if backend == "usearch":
         subprocess.run(
@@ -396,10 +403,10 @@ def db_construct(input_fastx, num_threads: int, backend: str = "vsearch"):
         subprocess.run(
             [
                 "vsearch",
-                "--fastx_unique",
+                "--fastx_uniques",
                 input_fastx,
                 "--fastaout",
-                f"{output_dir}/{base_name_noext}.uniq.fa",
+                f"{output_dir}/{base_name_noext}.uniq.fa.gz",
                 "--sizeout",
             ]
         )
@@ -517,7 +524,7 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
     # to replace `--otutab`, but the other commands are not implemented.
     # Besides, in usearch chimera is removed as part of the clustering step, but
     # in vsearch chimera removal is a separate step.
-    subprocess.run(
+    unoise3_proc = subprocess.Popen(
         [
             "vsearch",
             "--cluster_unoise",
@@ -525,56 +532,79 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
             "--minsize",
             str(minsize),
             "--centroids",
-            f"{output_dir}/temp.fa",
-            "--strand",
-            "both",
+            # f"{output_dir}/temp.fa",
+            "-",
+            # "--strand",
+            # "both",
         ],
-        check=True,
+        stdout=subprocess.PIPE,
     )
-    subprocess.run(
+    uchime3_proc = subprocess.Popen(
         [
             "vsearch",
             "--uchime3_denovo",
-            f"{output_dir}/temp.fa",
+            # f"{output_dir}/temp.fa",
+            "-",
             "--nonchimeras",
             out_fasta,
             "--relabel",
             "ZOTU",
         ],
+        stdin=unoise3_proc.stdout,
     )
-    os.remove(f"{output_dir}/temp.fa")
+    unoise3_proc.stdout.close()
+    uchime3_proc.wait()
 
 
-def search_global(input_fastq: str, zotu_fasta: str, num_threads: int, id_: float):
+def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: int):
     output_dir = os.path.dirname(input_fastq)
-    with open(f"{os.path.splitext(input_fastq)[0]}.fa", "w") as f:
-        subprocess.run(["seqtk", "seq", "-A", input_fastq], stdout=f, check=True)
-    subprocess.run(
+    # with open(f"{os.path.splitext(input_fastq)[0]}.fa", "w") as f:
+    seqtk_proc = subprocess.Popen(
+        ["seqtk", "seq", "-A", input_fastq], stdout=subprocess.PIPE
+    )
+    search_proc = subprocess.Popen(
         [
             "vsearch",
             "--usearch_global",
-            f"{os.path.splitext(input_fastq)[0]}.fa",
+            # f"{os.path.splitext(input_fastq)[0]}.fa",
+            "-",
             "--db",
             zotu_fasta,
             "--strand",
             "plus",
             "--id",
             str(id_),
+            "--maxaccepts",
+            "10",
+            "--maxhits",
+            "1",
             "--otutabout",
             f"{output_dir}/unoise3_zotu.tsv",
-            "--biomout",
-            f"{output_dir}/unoise3_zotu.biom",
-            "--alnout",
-            f"{output_dir}/unoise3_zotu.aln",
-            "--dbmatched",
-            f"{output_dir}/unoise3_zotu_dbmatched.fa",
-            "--dbnotmatched",
-            f"{output_dir}/unoise3_zotu_dbnotmatched.fa",
-            "--sizeout",
+            # "--biomout",
+            # f"{output_dir}/unoise3_zotu.biom",
+            # "--alnout",
+            # f"{output_dir}/unoise3_zotu.aln",
+            # "--matched",
+            # f"{output_dir}/unoise3_zotu_matched.fa.gz",
+            "--notmatched",
+            f"{output_dir}/unoise3_zotu_notmatched.fa.gz",
+            # "--sizeout",
             "--threads",
             str(num_threads),
-        ]
+        ],
+        stdin=seqtk_proc.stdout,
     )
+    seqtk_proc.stdout.close()
+    search_proc.wait()
+
+    # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
+    # matched to anything in database
+    zotu_table = pd.read_table(f"{output_dir}/unoise3_zotu.tsv", index_col=0)
+    counter = {i: 0 for i in zotu_table.columns}
+    for record in SeqIO.parse(f"{output_dir}/unoise3_zotu_notmatched.fa.gz", "fasta"):
+        counter[record.id.split("=")[1]] += 1
+    zotu_table.loc["ZOTU_UNKNOWN"] = pd.Series(counter)
+    zotu_table.to_csv(f"{output_dir}/unoise3_zotu.tsv", sep="\t")   
 
 
 def _cluster_unoise3(
@@ -963,7 +993,7 @@ def main():
         "-d", "--zotu_fasta", help="Input FASTA file to search against", type=str
     )
     search_global_parser.add_argument(
-        "--id", type=float, default=0.97, help="Minimum cluster identity"
+        "--id", type=float, default=0.9, help="Minimum cluster identity"
     )
     search_global_parser.add_argument(
         "-t", "--num_threads", type=int, default=8, help="Number of threads to use"
@@ -1021,16 +1051,14 @@ def main():
     # elif args.subcommand == "qc":
     #     qc(args.input_fastq, args.num_splits, args.num_threads)
     elif args.subcommand == "db_construct":
-        qc(args.input_fastq, args.num_splits, args.num_threads)
-        db_construct(
-            os.path.splitext(args.input_fastq)[0] + ".filtered.fa", args.num_threads
-        )
+        fastx_post_qc = qc(args.input_fastq, args.num_splits, args.num_threads)
+        db_construct(fastx_post_qc, args.num_threads)
     elif args.subcommand == "cluster_uparse":
         cluster_uparse(
             args.input_fastq, args.db_fasta, args.output_dir, args.num_threads
         )
     elif args.subcommand == "cluster_unoise3":
-        cluster_unoise3(args.uniq_fasta, args.minsize, args.out_fasta)
+            (args.uniq_fasta, args.minsize, args.out_fasta)
     elif args.subcommand == "search_global":
         search_global(args.input_fastq, args.zotu_fasta, args.id, args.num_threads)
     elif args.subcommand == "tax_nbc":

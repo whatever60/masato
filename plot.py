@@ -249,9 +249,9 @@ if __name__ == "__main__":
         type=str,
         choices=["stacked_bar", "heatmap", "heatmap_log10", "all"],
     )
-    parser_ab.add_argument("-f", "--fig_dir", type=str)
-    parser_ab.add_argument("-m", "--metadata", type=str)
     parser_ab.add_argument("-i", "--rel_ab_dir", type=str)
+    parser_ab.add_argument("-m", "--metadata", type=str)
+    parser_ab.add_argument("-f", "--fig_dir", type=str)
     parser_ab.add_argument("-s", "--sample_group_key", type=str, default="sample_group")
     parser_ab.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_ab.add_argument(
