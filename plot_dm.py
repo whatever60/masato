@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+"""
+Figures that have been tested:
+- Euclidean distance on log10 relative abundance at sample x genus (or others) level
+- Bray-Curtis distance on count at sample x ZOTU (or others) level
+"""
+
 import os
 
 import numpy as np
@@ -9,21 +16,24 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import seaborn as sns
 
+from get_abundance import get_otu_count, _agg_along_axis
 
 # configure matplotlib PDF saving to use text instead of vector graphics
 plt.rcParams["pdf.fonttype"] = 42
 
+
 def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    meta = pd.read_csv(metadata_path, index_col=0)
-    df = pd.read_csv(ab_path, index_col=0)
+    meta = pd.read_table(metadata_path, index_col=0)
+    df = pd.read_table(ab_path, index_col=0).T
 
     # drop_samples = df.index.str.contains("-V-") | df.index.str.contains("-SNS-")
     # drop_samples = df.index.str.contains("-5N-")
     # df = df.loc[~drop_samples]
     # meta = meta.loc[~drop_samples]
-    
+
     nonzero = df.sum(axis=1).astype(bool)
     df = df.loc[nonzero]
+    # import pdb; pdb.set_trace()
     meta = meta.loc[nonzero]
 
     # source = []
@@ -49,12 +59,11 @@ def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]
 
     rep_number = []
     for i in meta.index:
-        if "-S-" in i:
-            rep_number.append("Bulk")
-        elif "-R-" in i:
-            rep_number.append("Plate-R2A")
-        elif "-T-" in i:
-            rep_number.append("Plate-TSA")
+        # if "-S-" in i:
+        if i.startswith("B"):
+            rep_number.append("AFRL Boneyard")
+        elif i.startswith("C"):
+            rep_number.append("Cell concentrate")
         else:
             raise ValueError(i)
     meta["Source"] = rep_number
@@ -71,45 +80,40 @@ def eigsorted(cov: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def plot_dm(
-    ab_path: str,
-    meta_path: str,
+    df_otu_count: pd.DataFrame,
+    df_meta: pd.DataFrame,
     fig_path: str,
-    sample_group_key: str,
     distance: str,
-    log10: False,
+    hue: str = None,
+    style: str = None,
     plot_ellipses: bool = False,
 ) -> None:
-    ab, meta = _load(ab_path, meta_path)
-    if log10:
-        ab = np.log10(ab + 1e-8)
-    if distance == "bc":
-        pc_obj = pcoa(beta_diversity("braycurtis", ab), number_of_dimensions=10)
+    if distance == "braycurtis":
+        pc_obj = pcoa(
+            beta_diversity("braycurtis", df_otu_count), number_of_dimensions=10
+        )
         pc = pc_obj.samples.copy()
-        pc.index = ab.index
+        pc.index = df_otu_count.index
         variance = pc_obj.proportion_explained.to_numpy()
     elif distance == "euclid":
-        pc_obj = PCA(n_components=min(10, ab.shape[1])).fit(ab)
-        pc = pc_obj.transform(ab)
+        pc_obj = PCA(n_components=min(10, df_otu_count.shape[1])).fit(df_otu_count)
+        pc = pc_obj.transform(df_otu_count)
         pc = pd.DataFrame(
             pc,
-            index=ab.index,
+            index=df_otu_count.index,
             columns=[f"PC{i}" for i in range(1, pc.shape[1] + 1)],
         )
         variance = pc_obj.explained_variance_ratio_
     else:
         raise ValueError(
-            f"Unsupported distance metric: {distance}, select from 'bc' or 'euclid'"
+            f"Unsupported distance metric: {distance}, select from 'braycurtis' or 'euclid'."
         )
-    
-    pc[["Fabric type", "Source", "Replication number"]] = meta[
-        [sample_group_key, "Source", "source"]
-    ]
 
-    markers = {"Bulk": "X", "Plate-R2A": "o", "Plate-TSA": "s"}
-    style = "Source"
-    style_order = ["Bulk", "Plate-R2A", "Plate-TSA"]
-    hue = "Fabric type"
-    maker_s = 8
+    marker_size = 8
+    pc = pd.concat([pc, df_meta], axis=1)
+
+    # markers = {"Bulk": "X", "Plate-R2A": "o", "Plate-TSA": "s"}
+    style_order = sorted(pc[style].unique().tolist())
 
     fig, axs = plt.subplots(1, 2, figsize=(8, 3))
     sns.scatterplot(
@@ -118,8 +122,6 @@ def plot_dm(
         y="PC2",
         hue=hue,
         style=style,
-        markers=markers,
-        style_order=style_order,
         linewidth=0,
         legend=False,
         ax=axs[0],
@@ -133,7 +135,7 @@ def plot_dm(
         y="PC3",
         hue=hue,
         style=style,
-        markers=markers,
+        # markers=markers,
         style_order=style_order,
         linewidth=0,
         ax=axs[1],
@@ -148,9 +150,9 @@ def plot_dm(
         if l in hues:
             # set marker size to s and marker to o
             h.set_marker("o")
-        h.set_markersize(maker_s)
+        h.set_markersize(marker_size)
     axs[1].legend(handles, labels)
-    
+
     axs[1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
 
     if plot_ellipses:
@@ -173,9 +175,7 @@ def plot_dm(
                     # color=row_colors[pc["sample_group"].unique().tolist().index(group)],
                     alpha=0.2,
                 )
-                ell.set_facecolor(
-                    row_colors[pc[hue].unique().tolist().index(group)]
-                )
+                ell.set_facecolor(row_colors[pc[hue].unique().tolist().index(group)])
                 ell.set_edgecolor("grey")
                 ax.add_artist(ell)
 
@@ -183,3 +183,142 @@ def plot_dm(
     fig.savefig(fig_path, dpi=300, bbox_inches="tight")
     # also save a pdf file
     fig.savefig(os.path.splitext(fig_path)[0] + ".pdf", bbox_inches="tight")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-i",
+        "--otu_count_tsv",
+        help="Path to the OTU count table",
+        required=True,
+    )
+    parser.add_argument(
+        "-m",
+        "--metadata",
+        help="Path to the metadata table",
+        required=True,
+    )
+    parser.add_argument("-t", "--otu_taxonomy_tsv", type=str)
+    parser.add_argument(
+        "-o",
+        "--fig_dir",
+        help="Path to the output figure",
+        required=True,
+    )
+    parser.add_argument(
+        "-l",
+        "--tax_levels",
+        help="Taxonomic levels to plot",
+        nargs="+",
+        required=True,
+    )
+    parser.add_argument(
+        "-r",
+        "--rep_group_key",
+        help="Column name in the metadata table to group replicates. If null, plot is "
+        "generated without aggregating replicates.",
+        default=None,
+    )
+    parser.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
+    parser.add_argument("-w", "--sample_weight_key", default="sample_weight", type=str)
+    parser.add_argument(
+        "--relative",
+        help="Plot relative abundance",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--absolute",
+        help="Plot absolute abundance, exclusive with --relative",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-lg",
+        "--log10",
+        help="Log10 transform",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-d",
+        "--distance",
+        help="Distance metric",
+        required=True,
+    )
+    parser.add_argument(
+        "--hue",
+        help="Column name in the metadata table to color samples",
+        default=None,
+    )
+    parser.add_argument(
+        "--style",
+        help="Column name in the metadata table to style samples",
+        default=None,
+    )
+
+    parser.add_argument(
+        "-e",
+        "--ellipses",
+        help="Plot ellipses",
+        action="store_true",
+    )
+    args = parser.parse_args()
+
+    otu_count_tsv = args.otu_count_tsv
+    metadata = args.metadata
+    otu_taxonomy_tsv = args.otu_taxonomy_tsv
+    fig_dir = args.fig_dir
+    tax_levels = args.tax_levels
+    relative = args.relative
+    absolute = args.absolute
+    rep_group_key = args.rep_group_key
+    spikein_taxa_key = args.spikein_taxa_key
+    sample_weight_key = args.sample_weight_key
+    log10 = args.log10
+    distance = args.distance
+    hue = args.hue
+    style = args.style
+    ellipses = args.ellipses
+
+    if relative and absolute:
+        raise ValueError("Cannot set --relative and --absolute both.")
+    if relative:
+        transform = "rel"
+    elif absolute:
+        transform = "abs"
+    else:
+        transform = "count"
+
+    df_otu_count, df_meta, df_tax = get_otu_count(
+        otu_count_tsv,
+        metadata,
+        otu_taxonomy_tsv,
+        sample_weight_key=sample_weight_key,
+        spikein_taxa_key=spikein_taxa_key,
+    )
+    if relative:
+        df_otu = df_otu_count.div(df_otu_count.sum(axis=1), axis=0)
+    elif absolute:
+        df_otu = df_otu_count.div(df_meta.norm_factor, axis=0)
+    if rep_group_key is not None:
+        df_otu = _agg_along_axis(df_otu, df_meta[rep_group_key], axis=0)
+        df_meta = df_meta.groupby(rep_group_key).first()
+    if log10:
+        df_otu = np.log10(df_otu + 1e-8)
+
+    for level in tax_levels:
+        df_otu_tax = _agg_along_axis(df_otu, df_tax[level], axis=1)
+        fig_path = os.path.join(
+            fig_dir,
+            f"{distance}_{transform}_{'g' if rep_group_key else 's'}_{level}.png",
+        )
+        plot_dm(
+            df_otu,
+            df_meta,
+            fig_path,
+            distance=distance,
+            hue=hue,
+            style=style,
+            plot_ellipses=ellipses,
+        )

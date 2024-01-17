@@ -41,6 +41,7 @@ import argparse
 
 import pandas as pd
 import polars as pl
+
 # from skbio.diversity.alpha import chao1, shannon, simpson
 
 
@@ -224,11 +225,15 @@ def read_tables(
     common_otus = list(set(df_otu_count.columns).intersection(df_tax.index))
     df_otu_count = df_otu_count.loc[:, common_otus]
     df_tax = df_tax.loc[common_otus]
+    df_tax["otu"] = df_tax.index
     return df_otu_count, df_meta, df_tax
 
 
 def find_spikein_otus(
-    df_meta: pd.DataFrame, spikein_taxa_key: str, only_otus: bool = False
+    df_meta: pd.DataFrame,
+    df_tax: pd.DataFrame,
+    spikein_taxa_key: str,
+    only_otus: bool = False,
 ) -> dict[str, list[str]] | list[str]:
     try:
         all_spikeins = (
@@ -250,6 +255,28 @@ def find_spikein_otus(
         return spikein2otus
 
 
+def get_otu_count(
+    otu_count_table: str,
+    metadata_path: str,
+    otu_taxonomy_path: str,
+    sample_weight_key: str = None,
+    spikein_taxa_key: str = None,
+) -> pd.DataFrame:
+    df_otu_count, df_meta, df_tax = read_tables(
+        otu_count_table, metadata_path, otu_taxonomy_path
+    )
+    df_meta = _calc_norm_factor(
+        df_meta,
+        df_otu_count,
+        sample_weight_key,
+        spikein_taxa_key,
+    )
+    df_otu_count = df_otu_count.drop(
+        find_spikein_otus(df_meta, df_tax, spikein_taxa_key, only_otus=True), axis=1
+    )
+    return df_otu_count
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -263,7 +290,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-t", "--otu_taxonomy_path", required=True, help="Path to OTU taxonomy tsv."
     )
-    parser.add_argument("-s", "--spikein_taxa_key", type=str, default="spike_in")
+    parser.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
     parser.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser.add_argument("-w", "--sample_weight_key", default=None, type=str)
     parser.add_argument(
@@ -303,28 +330,24 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     # read inputs
-    df_otu_count, df_meta, df_tax = read_tables(
-        count_tsv_path, metadata_path, otu_taxonomy_path
-    )
-    df_meta = _calc_norm_factor(
-        df_meta,
-        df_otu_count,
+    df_otu_count, df_meta, df_tax = get_otu_count(
+        count_tsv_path,
+        metadata_path,
+        otu_taxonomy_path,
         sample_weight_key,
         spikein_taxa_key,
     )
-    df_otu_count = df_otu_count.drop(
-        find_spikein_otus(df_meta, spikein_taxa_key, only_otus=True), axis=1
-    )
+
+    df_meta.to_csv(f"{output_dir}/metadata_sample.csv")
     df_otu_abs_ab = df_otu_count.div(df_meta.norm_factor, axis=0)
+    df_otu_abs_ab.to_csv(f"{output_dir}/ab_abs_s_otu.csv")
+    
     df_otu_rel_ab = df_otu_count.div(df_otu_count.sum(axis=1), axis=0)
     df_otu_rel_ab_g = _agg_along_axis(df_otu_rel_ab, df_meta[rep_group_key], axis=0)
 
-    # df_meta.to_csv(f"{output_dir}/metadata_sample.csv")
     # df_otu_count.to_csv(f"{output_dir}/count_sample_otu.csv")
     # absolute abundance is only for OTU level
-    df_otu_abs_ab.to_csv(f"{output_dir}/ab_abs_s_otu.csv")
 
-    df_tax["otu"] = df_tax.index
     if len(rel_ab_thresholds) == 1:
         rel_ab_thresholds = rel_ab_thresholds * len(tax_levels)
     for level, rel_ab_thres in zip(tax_levels, rel_ab_thresholds):
@@ -342,9 +365,3 @@ if __name__ == "__main__":
         )
         df_tax_rel_ab_g.to_csv(f"{output_dir}/ab_rel_g_{level}.csv")
         df_tax_rel_ab.to_csv(f"{output_dir}/ab_rel_s_{level}.csv")
-        # df_tax_rel_ab.loc[df_meta.index].to_csv(
-        #     f"{output_dir}/rel_ab_sample_{level}.csv"
-        # )
-        # _calc_alpha_metrics(df_tax_rel_ab_g).drop("chao1", axis=1).to_csv(
-        #     f"{output_dir}/metadata_group_{level}.csv"
-        # )

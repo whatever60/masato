@@ -12,6 +12,12 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FixedLocator
 
+from get_abundance import (
+    get_otu_count,
+    _agg_along_axis,
+    _taxa_qc,
+)
+
 
 matplotlib.use("TkAgg")
 plt.rcParams["pdf.fonttype"] = 42
@@ -138,17 +144,17 @@ def _barplot_with_whisker_strip(
 ) -> None:
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
         df = df.copy()
-        index = []
-        for j in df[group_key]:
-            if j.endswith("-Swab-combined"):
-                index.append(j[1] + "-Bulk")
-            elif j.endswith("-Scrape-R2A"):
-                index.append(j[1] + "-Plate-R2A")
-            elif j.endswith("-Scrape-TSA"):
-                index.append(j[1] + "-Plate-TSA")
-            else:
-                raise ValueError(f"Unknown column: {j}")
-        df[group_key] = index
+        # index = []
+        # for j in df[group_key]:
+        #     if j.endswith("-Swab-combined"):
+        #         index.append(j[1] + "-Bulk")
+        #     elif j.endswith("-Scrape-R2A"):
+        #         index.append(j[1] + "-Plate-R2A")
+        #     elif j.endswith("-Scrape-TSA"):
+        #         index.append(j[1] + "-Plate-TSA")
+        #     else:
+        #         raise ValueError(f"Unknown column: {j}")
+        # df[group_key] = index
 
         group = df.groupby(group_key, sort=False)
         # Determine which groups have more than one sample
@@ -157,16 +163,17 @@ def _barplot_with_whisker_strip(
         ].unique()
 
         # assign different colors depending on if group.groups.keys() have "old", "reamplify", or "Scrape"
-        colors = []
-        for key in group.groups.keys():
-            if key.endswith("-Bulk"):
-                colors.append("tab:blue")
-            elif key.endswith("-Plate-R2A"):
-                colors.append("tab:orange")
-            elif key.endswith("-Plate-TSA"):
-                colors.append("tab:green")
-            else:
-                raise ValueError(f"Unknown group: {key}")
+        # colors = []
+        # for key in group.groups.keys():
+        #     if key.endswith("-Bulk"):
+        #         colors.append("tab:blue")
+        #     elif key.endswith("-Plate-R2A"):
+        #         colors.append("tab:orange")
+        #     elif key.endswith("-Plate-TSA"):
+        #         colors.append("tab:green")
+        #     else:
+        #         raise ValueError(f"Unknown group: {key}")
+        colors = "gray"
 
         # Plot bars with error bars for groups with multiple samples
         if len(groups_with_multiple_samples):
@@ -249,24 +256,54 @@ if __name__ == "__main__":
         type=str,
         choices=["stacked_bar", "heatmap", "heatmap_log10", "all"],
     )
-    parser_ab.add_argument("-i", "--rel_ab_dir", type=str)
+    parser_ab.add_argument("-i", "--otu_count_tsv", type=str)
     parser_ab.add_argument("-m", "--metadata", type=str)
-    parser_ab.add_argument("-f", "--fig_dir", type=str)
-    parser_ab.add_argument("-s", "--sample_group_key", type=str, default="sample_group")
+    parser_ab.add_argument("-t", "--otu_taxonomy_tsv", type=str)
+    parser_ab.add_argument("-f", "--fig_dir", type=str, required=True)
     parser_ab.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
+    parser_ab.add_argument("-s", "--sample_group_key", type=str, default="sample_group")
+    parser_ab.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
+    # parser_ab.add_argument(
+    #     "-w", "--sample_weight_key", default="sample_weight", type=str
+    # )
     parser_ab.add_argument(
-        "-t", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
+        "-l", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
+    )
+    parser_ab.add_argument(
+        "-a",
+        "--rel_ab_thresholds",
+        nargs="+",
+        type=float,
+        default=[0.01],
+        help="Genus relative abundance threshold.",
     )
 
     parser_stats = subparsers.add_parser("stats_sample_count")
-    parser_stats.add_argument("-f", "--fig_dir", type=str)
-    parser_stats.add_argument("-i", "--abs_ab_dir", type=str)
+    # parser_stats.add_argument("-i", "--abs_ab_dir", type=str)
+    # parser_stats.add_argument("-m", "--metadata", type=str)
+    # parser_stats.add_argument("-f", "--fig_dir", type=str)
+    # parser_stats.add_argument(
+    #     "-s", "--sample_group_key", type=str, default="sample_group"
+    # )
+    # parser_stats.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
+    # parser_stats.add_argument("-t", "--tax_levels", nargs="+", default=["otu"])
+    # copy from parser_ab
+    parser_stats.add_argument("-i", "--otu_count_tsv", type=str)
     parser_stats.add_argument("-m", "--metadata", type=str)
+    parser_stats.add_argument("-t", "--otu_taxonomy_tsv", type=str)
+    parser_stats.add_argument("-f", "--fig_dir", type=str)
+    parser_stats.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_stats.add_argument(
         "-s", "--sample_group_key", type=str, default="sample_group"
     )
-    parser_stats.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
-    parser_stats.add_argument("-t", "--tax_levels", nargs="+", default=["otu"])
+    parser_stats.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
+    # parser_stats.add_argument(
+    #     "-w", "--sample_weight_key", default="sample_weight", type=str
+    # )
+    parser_stats.add_argument("-ref", "--reference_key", type=str, default="reference")
+    parser_stats.add_argument(
+        "-l", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
+    )
     parser_stats.add_argument("-p", "--plot_strip", action="store_true", default=False)
 
     parser_pcoa = subparsers.add_parser("dm")
@@ -290,178 +327,193 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
+    otu_count_tsv = args.otu_count_tsv
+    metadata_tsv = args.metadata
+    otu_taxonomy_tsv = args.otu_taxonomy_tsv
+    fig_dir = args.fig_dir
+    rep_group_key = args.rep_group_key
     sample_group_key = args.sample_group_key
-    metadata = args.metadata
-    meta = pd.read_csv(metadata, sep=None, engine="python")
+    spikein_taxa_key = args.spikein_taxa_key
+    tax_levels = args.tax_levels
 
-    if args.command in ["abundance_group", "stats_sample_count"]:
-        fig_dir = args.fig_dir
-        rep_group_key = args.rep_group_key
-        tax_levels = args.tax_levels
+    # ====== read tables and preprocess ======
+    df_otu_count, df_meta, df_tax = get_otu_count(
+        otu_count_tsv,
+        metadata_tsv,
+        otu_taxonomy_tsv,
+        sample_weight_key=None,
+        spikein_taxa_key=spikein_taxa_key,
+    )
+    names, groups = zip(*[i for i in df_meta.groupby(sample_group_key)])
+    ratio = [i[rep_group_key].nunique() for i in groups]
+    os.makedirs(fig_dir, exist_ok=True)
 
-        os.makedirs(fig_dir, exist_ok=True)
-        names, groups = zip(*[i for i in meta.groupby(sample_group_key)])
-        ratio = [i[rep_group_key].nunique() for i in groups]
+    if args.command == "abundance_group":
+        rel_ab_thresholds = args.rel_ab_thresholds
+        plot_type = args.plot_type
 
-        if args.command == "abundance_group":
-            rel_ab_dir = args.rel_ab_dir
-            plot_type = args.plot_type
+        # process into relative abundance and aggregate at replication group level
+        df_otu_rel_ab_g = _agg_along_axis(
+            df_otu_count.div(df_otu_count.sum(axis=1), axis=0),
+            df_meta[rep_group_key],
+            axis=0,
+        )
+        if len(rel_ab_thresholds) == 1:
+            rel_ab_thresholds = rel_ab_thresholds * len(tax_levels)
 
-            for level in tax_levels:
-                res = pd.read_csv(f"{rel_ab_dir}/rel_ab_group_{level}.csv", index_col=0)
-                res = res[sorted(res.columns)]
-                res_group_list = [
-                    res.loc[group[rep_group_key].unique()] for group in groups
-                ]
-                num_cols = len(res_group_list)
-                width = 12
-                wspace = 0.1
+        for level, rel_ab_thres in zip(tax_levels, rel_ab_thresholds):
+            # aggregate at taxonomic level
+            res = _taxa_qc(
+                _agg_along_axis(df_otu_rel_ab_g, df_tax[level], axis=1),
+                rel_ab_thres,
+                keep_rare=True,
+                keep_unknown=True,
+            )
+            res = res[sorted(res.columns)]
+            res_group_list = [
+                res.loc[group[rep_group_key].unique()] for group in groups
+            ]
+            num_cols = len(res_group_list)
+            width = 6
+            wspace = 0.1
 
-                if plot_type in ["stacked_bar", "all"]:
-                    # stacked bar plot
-                    fig_size = (width, 4)
-                    custom_palette = (
-                        sns.color_palette("tab20", 20)
-                        + sns.color_palette("tab20b", 20)
-                        + sns.color_palette("tab20c", 20)
-                    )
+            if plot_type in ["stacked_bar", "all"]:
+                # stacked bar plot
+                fig_size = (width, 4)
+                custom_palette = (
+                    sns.color_palette("tab20", 20)
+                    + sns.color_palette("tab20b", 20)
+                    + sns.color_palette("tab20c", 20)
+                )
+                fig, axs = plt.subplots(
+                    1, num_cols, sharey=True, width_ratios=ratio, figsize=fig_size
+                )
+                _stacked_bar(
+                    res_group_list,
+                    names,
+                    f"Taxonomy at {level if level != 'otu' else level.upper()} level",
+                    custom_palette,
+                    axs,
+                )
+                fig.subplots_adjust(wspace=wspace)
+                fig.savefig(
+                    f"{fig_dir}/rel_ab_group_{level}_sb.png",
+                    bbox_inches="tight",
+                    dpi=300,
+                )
+                fig.savefig(
+                    f"{fig_dir}/rel_ab_group_{level}_sb.pdf",
+                    bbox_inches="tight",
+                    dpi=300,
+                )
+            if plot_type in ["heatmap", "heatmap_log10", "all"]:
+                size = (
+                    res.shape[0] // (res.shape[0] / width),
+                    res.shape[1] // (res.shape[0] / width),
+                )
+                if plot_type in ["heatmap_log10", "all"]:
                     fig, axs = plt.subplots(
-                        1, num_cols, sharey=True, width_ratios=ratio, figsize=fig_size
+                        1, num_cols, sharey=True, width_ratios=ratio, figsize=size
                     )
-                    _stacked_bar(
-                        res_group_list,
+                    _heatmap(
+                        [
+                            np.log10(res_group + 1e-4).T
+                            for res_group in res_group_list
+                        ],
                         names,
-                        f"Taxonomy at {level if level != 'otu' else level.upper()} level",
-                        custom_palette,
-                        axs,
+                        title=f"Taxonomy at {level} level",
+                        cbar_label="log10(relative abundance + 1e-4)",
+                        axs=axs,
+                        cmap="rocket_r",
                     )
                     fig.subplots_adjust(wspace=wspace)
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_sb.png",
+                        f"{fig_dir}/rel_ab_group_{level}_hml.png",
                         bbox_inches="tight",
                         dpi=300,
                     )
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_sb.pdf",
+                        f"{fig_dir}/rel_ab_group_{level}_hml.pdf",
                         bbox_inches="tight",
                         dpi=300,
                     )
-                if plot_type in ["heatmap", "heatmap_log10", "all"]:
-                    size = (
-                        res.shape[0] // (res.shape[0] / width),
-                        res.shape[1] // (res.shape[0] / width),
-                    )
-                    if plot_type in ["heatmap_log10", "all"]:
-                        fig, axs = plt.subplots(
-                            1, num_cols, sharey=True, width_ratios=ratio, figsize=size
-                        )
-                        _heatmap(
-                            [
-                                np.log10(res_group + 1e-4).T
-                                for res_group in res_group_list
-                            ],
-                            names,
-                            title=f"Taxonomy at {level} level",
-                            cbar_label="log10(relative abundance + 1e-4)",
-                            axs=axs,
-                            cmap="rocket_r",
-                        )
-                        fig.subplots_adjust(wspace=wspace)
-                        fig.savefig(
-                            f"{fig_dir}/rel_ab_group_{level}_hml.png",
-                            bbox_inches="tight",
-                            dpi=300,
-                        )
-                        fig.savefig(
-                            f"{fig_dir}/rel_ab_group_{level}_hml.pdf",
-                            bbox_inches="tight",
-                            dpi=300,
-                        )
-                    if plot_type in ["heatmap", "all"]:
-                        fig, axs = plt.subplots(
-                            1,
-                            len(groups),
-                            sharey=True,
-                            width_ratios=ratio,
-                            figsize=size,
-                        )
-                        _heatmap(
-                            [res_group.T for res_group in res_group_list],
-                            names,
-                            title=f"Taxonomy at {level} level",
-                            cbar_label="relative abundance",
-                            axs=axs,
-                            cmap=None,
-                        )
-                        fig.subplots_adjust(wspace=wspace)
-                        fig.savefig(
-                            f"{fig_dir}/rel_ab_group_{level}_hm.png",
-                            bbox_inches="tight",
-                            dpi=300,
-                        )
-                        fig.savefig(
-                            f"{fig_dir}/rel_ab_group_{level}_hm.pdf",
-                            bbox_inches="tight",
-                            dpi=300,
-                        )
-        elif args.command == "stats_sample_count":
-            abs_ab_dir = args.abs_ab_dir
-            plot_strip = args.plot_strip
-
-            for level in tax_levels:
-                res = pd.read_csv(f"{abs_ab_dir}/count_sample_{level}.csv", index_col=0)
-                meta_l = pd.merge(
-                    meta, _calc_alpha_metrics(res), left_on="sample", right_index=True
-                )
-                _, groups = zip(*[i for i in meta_l.groupby(sample_group_key)])
-                title_prefix = (
-                    f"{level.upper() if level == 'otu' else level.capitalize()}"
-                )
-                for column_of_interest, title in zip(
-                    ["shannon", "simpson", "richness", "chao1", "read_count"],
-                    [
-                        f"{title_prefix} Shannon entropy",
-                        f"{title_prefix} Simpson's index",
-                        f"{title_prefix} Richness",
-                        f"{title_prefix} Chao1 index",
-                        "Library size",
-                    ],
-                ):
+                if plot_type in ["heatmap", "all"]:
                     fig, axs = plt.subplots(
-                        1, len(groups), sharey=True, width_ratios=ratio, figsize=(15, 3)
+                        1,
+                        len(groups),
+                        sharey=True,
+                        width_ratios=ratio,
+                        figsize=size,
                     )
-                    _barplot_with_whisker_strip(
-                        groups,
-                        names=names,
-                        title=title,
-                        group_key=rep_group_key,
-                        column_of_interest=column_of_interest,
-                        plot_strip=plot_strip,
+                    _heatmap(
+                        [res_group.T for res_group in res_group_list],
+                        names,
+                        title=f"Taxonomy at {level} level",
+                        cbar_label="relative abundance",
                         axs=axs,
-                        ylog=column_of_interest in ["read_count"],
+                        cmap=None,
                     )
-                    fig.subplots_adjust(wspace=0.2)
+                    fig.subplots_adjust(wspace=wspace)
                     fig.savefig(
-                        f"{fig_dir}/{column_of_interest}_sample_{level}.png",
+                        f"{fig_dir}/rel_ab_group_{level}_hm.png",
                         bbox_inches="tight",
                         dpi=300,
                     )
                     fig.savefig(
-                        f"{fig_dir}/{column_of_interest}_sample_{level}.pdf",
+                        f"{fig_dir}/rel_ab_group_{level}_hm.pdf",
                         bbox_inches="tight",
                         dpi=300,
                     )
-    elif args.command == "dm":
-        from plot_dm import plot_dm
+    elif args.command == "stats_sample_count":
+        plot_strip = args.plot_strip
+        # no need for taxa qc, all taxa count
 
-        plot_dm(
-            args.input_ab,
-            args.metadata,
-            args.fig_path,
-            args.sample_group_key,
-            args.distance,
-            args.log10,
-            args.plot_ellipses,
-        )
+        for level in tax_levels:
+            res = _agg_along_axis(df_otu_count, df_tax[level], axis=1)
+            meta_l = pd.merge(
+                df_meta,
+                _calc_alpha_metrics(res),
+                left_on="sample",
+                right_index=True,
+            )
+            _, groups = zip(*[i for i in meta_l.groupby(sample_group_key)])
+            title_prefix = (
+                f"{level.upper() if level == 'otu' else level.capitalize()}"
+            )
+            for column_of_interest, title in zip(
+                ["shannon", "simpson", "richness", "chao1", "sequencing_depth"],
+                [
+                    f"{title_prefix} Shannon entropy",
+                    f"{title_prefix} Simpson's index",
+                    f"{title_prefix} Richness",
+                    f"{title_prefix} Chao1 index",
+                    "Library size",
+                ],
+            ):
+                fig, axs = plt.subplots(
+                    1, len(groups), sharey=True, width_ratios=ratio, figsize=(7, 3)
+                )
+                _barplot_with_whisker_strip(
+                    groups,
+                    names=names,
+                    title=title,
+                    group_key=rep_group_key,
+                    column_of_interest=column_of_interest,
+                    plot_strip=plot_strip,
+                    axs=axs,
+                    ylog=column_of_interest in ["read_count"],
+                )
+                fig.subplots_adjust(wspace=0.2)
+                fig.savefig(
+                    f"{fig_dir}/{column_of_interest}_sample_{level}.png",
+                    bbox_inches="tight",
+                    dpi=300,
+                )
+                fig.savefig(
+                    f"{fig_dir}/{column_of_interest}_sample_{level}.pdf",
+                    bbox_inches="tight",
+                    dpi=300,
+                )
     else:
         raise ValueError("Unknown command.")
