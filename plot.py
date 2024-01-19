@@ -312,7 +312,7 @@ def _get_subplots(
 
 
 def _rarefying(
-    df: pd.DataFrame, ref: list | int, repeat_num: int = 20
+    df: pd.DataFrame, ref: list[int], repeat_num: int = 20
 ) -> list[pd.DataFrame | list]:
     """Rarefy the dataframe to the reference list or integer.
 
@@ -325,23 +325,10 @@ def _rarefying(
     <original_sample_name>_rarefied_<repeat_num>.
     """
     # make sure all columns in df are positive integers and are in ref.
-    if isinstance(ref, list):
-        if not len(ref) == len(df):
-            raise ValueError(
-                "The length of ref should be the same as the number of rows in df."
-            )
-        if not np.in1d(ref, df.index).all():
-            raise ValueError("All elements in ref should be in the index of df.")
-        if df.dtypes[df.dtypes != "int64"].any():
-            raise ValueError("All columns in df should be integer.")
-        depth = df.sum(axis=1)
-        ref = depth[ref].to_list()
-    elif isinstance(ref, int):
-        depth = df.sum(axis=1)
-        min_depth = depth.min()
-        ref = [min(ref, min_depth - 1)] * len(df)
-    else:
-        raise ValueError("ref should be either a list or an integer.")
+    if not len(ref) == len(df):
+        raise ValueError(
+            "The length of ref should be the same as the number of rows in df."
+        )
 
     # get a list of 2d numpy array using joblib parallisim
     res = Parallel(n_jobs=4)(
@@ -363,7 +350,7 @@ def rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
     """Rarefy one row k times so that each row sum up to n."""
     depth = arr.sum()
     rng = np.random.default_rng(seed=seed)
-    if n >= depth:
+    if n >= depth:  # don't rarefy if expected depth is larger than the actual depth.
         return arr.reshape(1, -1)
     all_elements = np.repeat(np.arange(arr.size), arr)
     return np.stack(
@@ -428,10 +415,8 @@ if __name__ == "__main__":
     parser_stats.add_argument(
         "-l", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
     )
-    parser_stats.add_argument(
-        "-rm", "--rarefying_mode", type=str, choices=["ref", "min", "fixed"]
-    )
-    parser_stats.add_argument("-rv", "--rarefying_value")
+    parser_stats.add_argument("-rk", "--rarefying_key", type=str, default=None)
+    parser_stats.add_argument("-rv", "--rarefying_value", type=int, default=None)
     parser_stats.add_argument("-rn", "--rarefying_repeat", type=int, default=10)
     parser_stats.add_argument("-p", "--plot_strip", action="store_true", default=False)
 
@@ -564,25 +549,44 @@ if __name__ == "__main__":
                     )
     elif args.command == "stats_sample_count":
         plot_strip = args.plot_strip
-        rarefying_mode = args.rarefying_mode
+        rarefying_key = args.rarefying_key
         rarefying_value = args.rarefying_value
 
-        if rarefying_mode == "ref":
-            ref = df_meta[rarefying_value].to_list()
-        elif rarefying_mode == "min":
-            ref = df_otu_count.sum(axis=1).min() - 1
-        elif rarefying_mode == "fixed":
-            ref = int(rarefying_value)
-
-        # rarefy
-        df_otu_count, names_orig = _rarefying(df_otu_count, ref, args.rarefying_repeat)
-        df_meta = pd.merge(
-            pd.DataFrame(index=names_orig),
-            df_meta,
-            left_index=True,
-            right_index=True,
-        ).reset_index(names=df_meta.index.name)
-        df_meta.index = df_otu_count.index
+        if rarefying_key is not None:
+            # Rarefying takes place by the following order:
+            # - When rarefying_key is specified:
+            #    - When this key is a string, rarefy to the depth of the sample corresponding to the key.
+            #    - When this key is a int, rarefy to this value.
+            #    - When this key is None, rarefy to `rarefying_value`.
+            # - When rarefying_key is None:
+            #    - When rarefying_value is specified, rarefy to this value.
+            #    - When rarefying_value is None, rarefy to the minimum depth of all samples - 1.
+            depth = df_otu_count.sum(axis=1)
+            if rarefying_value is None:
+                rarefying_value = int(depth.min() - 1)
+            ref = []
+            for i in df_meta[rarefying_key].tolist():
+                if isinstance(i, str):
+                    if not i in df_otu_count.index:
+                        raise ValueError(f"Reference sample {i} is not available.")
+                    ref.append(depth[i])
+                elif isinstance(i, int):
+                    ref.append(i)
+                elif i is None:
+                    ref.append(rarefying_value)
+                else:
+                    raise ValueError(f"Unknown value for rarefying_key: {rarefying_key}")
+            # rarefy
+            df_otu_count, names_orig = _rarefying(
+                df_otu_count, ref, args.rarefying_repeat
+            )
+            df_meta = pd.merge(
+                pd.DataFrame(index=names_orig),
+                df_meta,
+                left_index=True,
+                right_index=True,
+            ).reset_index(names=df_meta.index.name)
+            df_meta.index = df_otu_count.index
 
         for level in tax_levels:
             # no need for taxa qc, all taxa count
