@@ -224,15 +224,22 @@ if __name__ == "__main__":
     )
     parser.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
     parser.add_argument("-w", "--sample_weight_key", default="sample_weight", type=str)
+    # parser.add_argument(
+    #     "--relative",
+    #     help="Plot relative abundance",
+    #     action="store_true",
+    # )
+    # parser.add_argument(
+    #     "--absolute",
+    #     help="Plot absolute abundance, exclusive with --relative",
+    #     action="store_true",
+    # )
     parser.add_argument(
-        "--relative",
-        help="Plot relative abundance",
-        action="store_true",
-    )
-    parser.add_argument(
-        "--absolute",
-        help="Plot absolute abundance, exclusive with --relative",
-        action="store_true",
+        "-tr",
+        "--transform",
+        choices=["count", "relative", "absolute"],
+        default="count",
+        help="Transform to apply to the OTU count table",
     )
     parser.add_argument(
         "-lg",
@@ -270,8 +277,7 @@ if __name__ == "__main__":
     otu_taxonomy_tsv = args.otu_taxonomy_tsv
     fig_dir = args.fig_dir
     tax_levels = args.tax_levels
-    relative = args.relative
-    absolute = args.absolute
+    transform = args.transform
     rep_group_key = args.rep_group_key
     spikein_taxa_key = args.spikein_taxa_key
     sample_weight_key = args.sample_weight_key
@@ -281,15 +287,6 @@ if __name__ == "__main__":
     style = args.style
     ellipses = args.ellipses
 
-    if relative and absolute:
-        raise ValueError("Cannot set --relative and --absolute both.")
-    if relative:
-        transform = "rel"
-    elif absolute:
-        transform = "abs"
-    else:
-        transform = "count"
-
     df_otu_count, df_meta, df_tax = get_otu_count(
         otu_count_tsv,
         metadata,
@@ -297,10 +294,15 @@ if __name__ == "__main__":
         sample_weight_key=sample_weight_key,
         spikein_taxa_key=spikein_taxa_key,
     )
-    if relative:
+    if transform == "relative":
         df_otu = df_otu_count.div(df_otu_count.sum(axis=1), axis=0)
-    elif absolute:
+    elif transform == "absolute":
         df_otu = df_otu_count.div(df_meta.norm_factor, axis=0)
+    elif transform == "count":
+        df_otu = df_otu_count.copy()
+    else:
+        raise ValueError(f"Unsupported transform: {transform}")
+    
     if rep_group_key is not None:
         df_otu = _agg_along_axis(df_otu, df_meta[rep_group_key], axis=0)
         df_meta = df_meta.groupby(rep_group_key).first()
