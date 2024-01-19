@@ -3,57 +3,91 @@ import glob
 import gzip
 import os
 import re
-import sys
 import warnings
-from typing import Iterator, TextIO
 
 import pandas as pd
 from tqdm.auto import tqdm
 
 
+def pattern_illumina(file_: str) -> tuple[str, str]:
+    """Pattern function for Illumina default output."""
+    file_pattern = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q.gz$")
+    match = file_pattern.search(os.path.basename(file_))
+    if match:
+        sample_name, read_type = match.groups()[:2]
+        return sample_name, read_type
+    return None
+
+
+def pattern_custom(file_: str) -> tuple[str, str]:
+    """Pattern function for custom pattern ending with fq.gz or fastq.gz."""
+    file_pattern = re.compile(r"^(.+?)_(R[12]).f(ast)?q.gz$")
+    match = file_pattern.search(os.path.basename(file_))
+    if match:
+        sample_name, read_type = match.groups()[:2]
+        return sample_name, read_type
+    return None
+
+
 def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
-    # Regular expressions to identify R1 and R2 files, excluding the 'S' followed by a number
-    file_pattern = re.compile(r"(.+?)_S\d+_L(\d{3})_(R[12])_001.fastq.gz$")
+    pattern_functions = [pattern_illumina, pattern_custom]
 
     # Dictionary to store file pairs
     file_pairs = {}
 
-    # Find all .fastq.gz files in the directory
-    fastq_files = glob.glob(os.path.join(directory, "*.fastq.gz"))
+    # Find all .fastq.gz and .fq.gz files in the directory
+    fastq_files = glob.glob(os.path.join(directory, "*.fastq.gz")) + glob.glob(
+        os.path.join(directory, "*.fq.gz")
+    )
 
-    # Process each file
-    for file in fastq_files:
-        match = file_pattern.search(os.path.basename(file))
-        if match:
-            sample_name, lane, read_type = match.groups()
-            pair_key = (sample_name, lane, read_type)
+    # Process each file using pattern functions
+    for file_ in fastq_files:
+        matched = False
+        for pattern_function in pattern_functions:
+            match = pattern_function(file_)
+            if match:
+                sample_name, read_type = match
+                if read_type not in ["R1", "R2"]:
+                    warnings.warn(f"Invalid read type for file: {file_}")
+                    continue
 
-            # Add the file to the dictionary
-            if pair_key in file_pairs:
-                file_pairs[pair_key].append(file)
-            else:
-                file_pairs[pair_key] = [file]
-        else:
-            warnings.warn(f"File {file} does not match the expected pattern.")
+                pair_key = (sample_name, read_type)
+
+                # Add the file to the dictionary and check for duplicates
+                if pair_key in file_pairs:
+                    warnings.warn(f"Duplicate file for {pair_key}: {file_}")
+                else:
+                    file_pairs[pair_key] = file_
+                matched = True
+                break
+
+        if not matched:
+            warnings.warn(f"File {file_} does not match any known pattern.")
 
     # Match R1 and R2 pairs and prepare the output
     matched_pairs = []
-    for (sample_name, lane, read_type), files in file_pairs.items():
-        # Find the corresponding pair file
-        pair_type = "R2" if read_type == "R1" else "R1"
-        pair_key = (sample_name, lane, pair_type)
+    processed_samples = set()
 
-        if pair_key in file_pairs and len(file_pairs[pair_key]) == 1:
-            r1_file = files[0] if read_type == "R1" else file_pairs[pair_key][0]
-            r2_file = file_pairs[pair_key][0] if read_type == "R1" else files[0]
+    for (sample_name, read_type), file_ in file_pairs.items():
+        if sample_name in processed_samples:
+            # Skip if we've already processed this sample
+            continue
+
+        processed_samples.add(sample_name)
+        pair_type = "R2" if read_type == "R1" else "R1"
+        pair_key = (sample_name, pair_type)
+
+        if pair_key in file_pairs:
+            r1_file = file_ if read_type == "R1" else file_pairs[pair_key]
+            r2_file = file_pairs[pair_key] if read_type == "R1" else file_
             matched_pairs.append((r1_file, r2_file, sample_name))
         else:
-            warnings.warn(f"Missing pair for file: {files[0]}")
+            warnings.warn(f"Missing pair for file: {file_}")
 
     # Report the number of matched pairs
     print(f"Number of matched pairs: {len(matched_pairs)}")
 
-    # order by sample name
+    # Order by sample name
     matched_pairs.sort(key=lambda x: x[2])
     return matched_pairs
 
@@ -61,7 +95,7 @@ def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
 def cat_fastq(
     directory: str,
     output_fp_r1,
-    output_fp_r2= None,
+    output_fp_r2=None,
     metadata: str = None,
     _remove_undet: bool = False,
 ):
@@ -83,9 +117,11 @@ def cat_fastq(
     if metadata is not None:
         samples_in_meta = pd.read_table(metadata, index_col=0).index.to_list()
     else:
+
         class _all_in:
             def __contains__(self, item):
                 return True
+
         samples_in_meta = _all_in()
 
     if (
