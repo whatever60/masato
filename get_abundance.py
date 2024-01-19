@@ -52,8 +52,9 @@ def _find_otus_by_taxon(df_tax: pd.DataFrame, taxon: str) -> list[str]:
 
 
 def _calc_norm_factor(
-    df_meta: pd.DataFrame,
     df_otu_count: pd.DataFrame,
+    df_meta: pd.DataFrame,
+    df_tax: pd.DataFrame,
     sample_weight_key: str = None,
     spikein_taxa_key: str = None,
 ) -> pd.DataFrame:
@@ -69,7 +70,7 @@ def _calc_norm_factor(
 
     A new metadata dataframe will be returned.
     """
-    spikein2otus = find_spikein_otus(df_meta, spikein_taxa_key)
+    spikein2otus = find_spikein_otus(df_meta, df_tax, spikein_taxa_key)
 
     def compute_spikein_and_norm(row: pd.Series) -> pd.Series:
         otu_count_series = df_otu_count.loc[row.name]
@@ -266,15 +267,16 @@ def get_otu_count(
         otu_count_table, metadata_path, otu_taxonomy_path
     )
     df_meta = _calc_norm_factor(
-        df_meta,
         df_otu_count,
+        df_meta,
+        df_tax,
         sample_weight_key,
         spikein_taxa_key,
     )
     df_otu_count = df_otu_count.drop(
         find_spikein_otus(df_meta, df_tax, spikein_taxa_key, only_otus=True), axis=1
     )
-    return df_otu_count
+    return df_otu_count, df_meta, df_tax
 
 
 if __name__ == "__main__":

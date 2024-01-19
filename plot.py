@@ -3,20 +3,19 @@ import argparse
 import os
 
 import numpy as np
+from scipy.cluster.hierarchy import linkage, leaves_list, dendrogram
 import pandas as pd
 from skbio.diversity.alpha import chao1, shannon, simpson
-from skbio.diversity import beta_diversity
-from skbio.stats.ordination import pcoa
+from joblib import Parallel, delayed
 import seaborn as sns
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from matplotlib.ticker import FixedLocator
 
-from get_abundance import (
-    get_otu_count,
-    _agg_along_axis,
-    _taxa_qc,
-)
+# from tqdm.auto import tqdm
+
+from get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
 
 
 matplotlib.use("TkAgg")
@@ -37,6 +36,16 @@ def _get_color_palette(
     return color_map
 
 
+def _get_dendrogram(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Perform hierarchical clustering on the dataframe (treating column as samples and
+    row as features), reorder the columns and get the dendrogram.
+    """
+    linked = linkage(df.transpose(), "single")
+    order = leaves_list(linked)
+    df = df.iloc[:, order]
+    return df, linked
+
+
 def _stacked_bar(
     dfs: list[pd.DataFrame],
     names: list[str],
@@ -44,7 +53,7 @@ def _stacked_bar(
     palette: list,
     axs: list[plt.Axes],
 ) -> None:
-    for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
+    for i, (ax_dend, ax, df, name) in enumerate(zip(axs[0], axs[1], dfs, names)):
         # df = df.copy()
         # index = []
         # for j in df.index:
@@ -62,6 +71,10 @@ def _stacked_bar(
         ax.set_xlabel("")
         ax.set_ylabel("Relative abundance")
         ax.set_title(name)
+
+        if ax_dend is not None:
+            ax_dend.axis("off")
+
         # set xticklabels size
         # ax.tick_params(axis="x", labelsize=6)
         # remove legend unless the last plot
@@ -74,15 +87,19 @@ def _stacked_bar(
         ax.set_xlabel(ax.xaxis.get_label().get_text(), fontsize=14)
 
 
+def _black_color_func(*args, **kwargs):
+    return "black"
+
+
 def _heatmap(
     dfs: list[pd.DataFrame],
     names: list[str],
     title: str,
     cbar_label: str,
-    axs: list[plt.Axes],
+    axs: list[list[plt.Axes]],
     cmap: str,
 ) -> None:
-    for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
+    for i, (ax_dend, ax, df, name) in enumerate(zip(axs[0], axs[1], dfs, names)):
         # df = df.copy()
         # columns = []
         # for j in df.columns:
@@ -96,39 +113,49 @@ def _heatmap(
         #         raise ValueError(f"Unknown column: {j}")
         # df.columns = columns
 
-        if i == len(axs) - 1:
+        if i == len(axs[1]) - 1:
+            cbar = True
             cbar_ax = fig.add_axes(
                 [
                     ax.get_position().x1 + 0.03,
-                    axs[i - 1].get_position().y0,
+                    axs[1][i - 1].get_position().y0,
                     0.03,
-                    axs[i - 1].get_position().height,
+                    axs[1][i - 1].get_position().height,
                 ]
             )
-            sns.heatmap(
-                df,
-                ax=ax,
-                cmap=cmap,
-                lw=0.7,
-                cbar=True,
-                cbar_ax=cbar_ax,
-                cbar_kws={"label": cbar_label},
-                square=True,
-            )
             cbar_ax.yaxis.label.set_size(12)
+            cbar_kws = {"label": cbar_label}
+        else:
+            cbar = False
+            cbar_ax = None
+            cbar_kws = None
+
+        df, linked = _get_dendrogram(df)
         sns.heatmap(
             df,
             ax=ax,
             cmap=cmap,
             lw=0.7,
-            cbar=False,
-            cbar_ax=None,
-            square=True,
+            cbar=cbar,
+            cbar_ax=cbar_ax,
+            cbar_kws=cbar_kws,
+            # square=True,
         )
         ax.set_xlabel("")
-        ax.set_title(name)
+
+        if ax_dend is not None:
+            # plot dendrogram
+            dendrogram(
+                linked, ax=ax_dend, leaf_rotation=90, link_color_func=_black_color_func
+            )
+            ax_dend.axis("off")
+            ax_dend.set_title(name)
+
+        # turn off y axis ticks and tick labels (set invisible) except for the first panel
         if i == 0:
             ax.set_ylabel(title, fontsize=16)
+        else:
+            ax.yaxis.set_visible(False)
         # ax.tick_params(axis="x", labelsize=7)
 
 
@@ -246,6 +273,110 @@ def _calc_alpha_metrics(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def _get_subplots(
+    num_cols: int,
+    fig_size: tuple[float, float],
+    width_ratios: list[float],
+    height_ratios: tuple[float, float] | None = (0.07, 1),
+    wspace: float = 0.1,
+    hspace: float = 0.01,
+) -> tuple[plt.Figure, list[list[plt.Axes]]]:
+    """A helper function to get matplotlib figure and axes for plotting stacked bar plot
+    or heatmap with multiple panels.
+    """
+    if height_ratios is None:  # no hierarchical clustering
+        fig, axs = plt.subplots(
+            1,
+            num_cols,
+            sharey="row",
+            figsize=fig_size,
+            width_ratios=width_ratios,
+        )
+        axs = [[None] * num_cols, axs]
+        fig.subplots_adjust(wspace=wspace)
+    else:
+        if not len(height_ratios) == 2:
+            raise ValueError("height_ratios should be a list of length 2.")
+        fig, axs = plt.subplots(
+            2,
+            num_cols,
+            figsize=fig_size,
+            width_ratios=width_ratios,
+            height_ratios=height_ratios,
+        )
+        # share y for the heatmap, i.e., the second row
+        for i in range(1, num_cols):
+            axs[1, i].sharey(axs[1, 0])
+        fig.subplots_adjust(wspace=wspace, hspace=hspace)
+    return fig, axs
+
+
+def _rarefying(
+    df: pd.DataFrame, ref: list | int, repeat_num: int = 20
+) -> list[pd.DataFrame | list]:
+    """Rarefy the dataframe to the reference list or integer.
+
+    The input dataframe should be sample x features, with sample name as index.
+
+    In the returned output, each sample in the input dataframe will be rarefied
+    `repeat_num` times, resulting in a dataframe with shape (sample x features x
+    repeat_num), except for samples whose reference is themselves, which will be
+    repeated only once. Sample name in the returned output will be like
+    <original_sample_name>_rarefied_<repeat_num>.
+    """
+    # make sure all columns in df are positive integers and are in ref.
+    if isinstance(ref, list):
+        if not len(ref) == len(df):
+            raise ValueError(
+                "The length of ref should be the same as the number of rows in df."
+            )
+        if not np.in1d(ref, df.index).all():
+            raise ValueError("All elements in ref should be in the index of df.")
+        if df.dtypes[df.dtypes != "int64"].any():
+            raise ValueError("All columns in df should be integer.")
+        depth = df.sum(axis=1)
+        ref = depth[ref].to_list()
+    elif isinstance(ref, int):
+        depth = df.sum(axis=1)
+        min_depth = depth.min()
+        ref = [min(ref, min_depth - 1)] * len(df)
+    else:
+        raise ValueError("ref should be either a list or an integer.")
+
+    # get a list of 2d numpy array using joblib parallisim
+    res = Parallel(n_jobs=4)(
+        delayed(rarefy_array)(df.iloc[idx].to_numpy(), n, repeat_num)
+        for idx, n in enumerate(ref)
+    )
+    res = np.concatenate(res, axis=0)
+    sample_names_new_orig = [
+        (f"{sample_name}_rarefied_{j}", sample_name)
+        for idx, sample_name in enumerate(df.index)
+        for j in range(repeat_num if ref[idx] != depth[idx] else 1)
+    ]
+    idx_new = [i[0] for i in sample_names_new_orig]
+    idx_orig = [i[1] for i in sample_names_new_orig]
+    return pd.DataFrame(res, index=idx_new, columns=df.columns), idx_orig
+
+
+def rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
+    """Rarefy one row k times so that each row sum up to n."""
+    depth = arr.sum()
+    rng = np.random.default_rng(seed=seed)
+    if n >= depth:
+        return arr.reshape(1, -1)
+    all_elements = np.repeat(np.arange(arr.size), arr)
+    return np.stack(
+        [
+            np.bincount(
+                rng.choice(all_elements, size=n, replace=False), minlength=arr.size
+            )
+            for _ in range(k)
+        ],
+        axis=0,
+    )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
@@ -263,9 +394,6 @@ if __name__ == "__main__":
     parser_ab.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_ab.add_argument("-s", "--sample_group_key", type=str, default="sample_group")
     parser_ab.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
-    # parser_ab.add_argument(
-    #     "-w", "--sample_weight_key", default="sample_weight", type=str
-    # )
     parser_ab.add_argument(
         "-l", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
     )
@@ -277,54 +405,35 @@ if __name__ == "__main__":
         default=[0.01],
         help="Genus relative abundance threshold.",
     )
+    parser_ab.add_argument(
+        "-sc",
+        "--smaple_hierarchical_clustering",
+        action="store_true",
+        default=False,
+        help="Perform hierarchical clustering on samples in each group, order them "
+        "accordingly and add a dendrogram at the top. Only affects heatmap, not "
+        "stacked bar plot.",
+    )
 
     parser_stats = subparsers.add_parser("stats_sample_count")
-    # parser_stats.add_argument("-i", "--abs_ab_dir", type=str)
-    # parser_stats.add_argument("-m", "--metadata", type=str)
-    # parser_stats.add_argument("-f", "--fig_dir", type=str)
-    # parser_stats.add_argument(
-    #     "-s", "--sample_group_key", type=str, default="sample_group"
-    # )
-    # parser_stats.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
-    # parser_stats.add_argument("-t", "--tax_levels", nargs="+", default=["otu"])
-    # copy from parser_ab
     parser_stats.add_argument("-i", "--otu_count_tsv", type=str)
     parser_stats.add_argument("-m", "--metadata", type=str)
     parser_stats.add_argument("-t", "--otu_taxonomy_tsv", type=str)
     parser_stats.add_argument("-f", "--fig_dir", type=str)
-    parser_stats.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_stats.add_argument(
         "-s", "--sample_group_key", type=str, default="sample_group"
     )
+    parser_stats.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_stats.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
-    # parser_stats.add_argument(
-    #     "-w", "--sample_weight_key", default="sample_weight", type=str
-    # )
-    parser_stats.add_argument("-ref", "--reference_key", type=str, default="reference")
     parser_stats.add_argument(
         "-l", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
     )
+    parser_stats.add_argument(
+        "-rm", "--rarefying_mode", type=str, choices=["ref", "min", "fixed"]
+    )
+    parser_stats.add_argument("-rv", "--rarefying_value")
+    parser_stats.add_argument("-rn", "--rarefying_repeat", type=int, default=10)
     parser_stats.add_argument("-p", "--plot_strip", action="store_true", default=False)
-
-    parser_pcoa = subparsers.add_parser("dm")
-    parser_pcoa.add_argument(
-        "-i",
-        "--input_ab",
-        type=str,
-        help="Input abundance matrix, in csv format, could be anything really, absolute "
-        "or relative, sample-level or group-level. But probably sample x OTU count "
-        "matrix is the most common one.",
-    )
-    parser_pcoa.add_argument("-m", "--metadata", type=str)
-    parser_pcoa.add_argument("-f", "--fig_path", type=str)
-    parser_pcoa.add_argument(
-        "-s", "--sample_group_key", type=str, default="sample_group"
-    )
-    parser_pcoa.add_argument("-d", "--distance", type=str, choices=["bc", "euclid"])
-    parser_pcoa.add_argument("-l", "--log10", action="store_true", default=False)
-    parser_pcoa.add_argument(
-        "-e", "--plot_ellipses", action="store_true", default=False
-    )
 
     args = parser.parse_args()
 
@@ -345,6 +454,7 @@ if __name__ == "__main__":
         sample_weight_key=None,
         spikein_taxa_key=spikein_taxa_key,
     )
+
     names, groups = zip(*[i for i in df_meta.groupby(sample_group_key)])
     ratio = [i[rep_group_key].nunique() for i in groups]
     os.makedirs(fig_dir, exist_ok=True)
@@ -352,6 +462,7 @@ if __name__ == "__main__":
     if args.command == "abundance_group":
         rel_ab_thresholds = args.rel_ab_thresholds
         plot_type = args.plot_type
+        sample_hierarchical_clustering = args.smaple_hierarchical_clustering
 
         # process into relative abundance and aggregate at replication group level
         df_otu_rel_ab_g = _agg_along_axis(
@@ -376,7 +487,7 @@ if __name__ == "__main__":
             ]
             num_cols = len(res_group_list)
             width = 6
-            wspace = 0.1
+            # wspace, hspace = 0.1, 0.01
 
             if plot_type in ["stacked_bar", "all"]:
                 # stacked bar plot
@@ -386,9 +497,7 @@ if __name__ == "__main__":
                     + sns.color_palette("tab20b", 20)
                     + sns.color_palette("tab20c", 20)
                 )
-                fig, axs = plt.subplots(
-                    1, num_cols, sharey=True, width_ratios=ratio, figsize=fig_size
-                )
+                fig, axs = _get_subplots(num_cols, fig_size, ratio, height_ratios=None)
                 _stacked_bar(
                     res_group_list,
                     names,
@@ -396,7 +505,6 @@ if __name__ == "__main__":
                     custom_palette,
                     axs,
                 )
-                fig.subplots_adjust(wspace=wspace)
                 fig.savefig(
                     f"{fig_dir}/rel_ab_group_{level}_sb.png",
                     bbox_inches="tight",
@@ -410,24 +518,21 @@ if __name__ == "__main__":
             if plot_type in ["heatmap", "heatmap_log10", "all"]:
                 size = (
                     res.shape[0] // (res.shape[0] / width),
-                    res.shape[1] // (res.shape[0] / width),
+                    res.shape[1] // (res.shape[0] / width * 1.3),
                 )
+                if sample_hierarchical_clustering:
+                    fig, axs = _get_subplots(num_cols, size, ratio)
+                else:
+                    fig, axs = _get_subplots(num_cols, size, ratio, height_ratios=None)
                 if plot_type in ["heatmap_log10", "all"]:
-                    fig, axs = plt.subplots(
-                        1, num_cols, sharey=True, width_ratios=ratio, figsize=size
-                    )
                     _heatmap(
-                        [
-                            np.log10(res_group + 1e-4).T
-                            for res_group in res_group_list
-                        ],
+                        [np.log10(res_group + 1e-4).T for res_group in res_group_list],
                         names,
                         title=f"Taxonomy at {level} level",
                         cbar_label="log10(relative abundance + 1e-4)",
                         axs=axs,
                         cmap="rocket_r",
                     )
-                    fig.subplots_adjust(wspace=wspace)
                     fig.savefig(
                         f"{fig_dir}/rel_ab_group_{level}_hml.png",
                         bbox_inches="tight",
@@ -439,13 +544,6 @@ if __name__ == "__main__":
                         dpi=300,
                     )
                 if plot_type in ["heatmap", "all"]:
-                    fig, axs = plt.subplots(
-                        1,
-                        len(groups),
-                        sharey=True,
-                        width_ratios=ratio,
-                        figsize=size,
-                    )
                     _heatmap(
                         [res_group.T for res_group in res_group_list],
                         names,
@@ -454,7 +552,6 @@ if __name__ == "__main__":
                         axs=axs,
                         cmap=None,
                     )
-                    fig.subplots_adjust(wspace=wspace)
                     fig.savefig(
                         f"{fig_dir}/rel_ab_group_{level}_hm.png",
                         bbox_inches="tight",
@@ -467,21 +564,38 @@ if __name__ == "__main__":
                     )
     elif args.command == "stats_sample_count":
         plot_strip = args.plot_strip
-        # no need for taxa qc, all taxa count
+        rarefying_mode = args.rarefying_mode
+        rarefying_value = args.rarefying_value
+
+        if rarefying_mode == "ref":
+            ref = df_meta[rarefying_value].to_list()
+        elif rarefying_mode == "min":
+            ref = df_otu_count.sum(axis=1).min() - 1
+        elif rarefying_mode == "fixed":
+            ref = int(rarefying_value)
+
+        # rarefy
+        df_otu_count, names_orig = _rarefying(df_otu_count, ref, args.rarefying_repeat)
+        df_meta = pd.merge(
+            pd.DataFrame(index=names_orig),
+            df_meta,
+            left_index=True,
+            right_index=True,
+        ).reset_index(names=df_meta.index.name)
+        df_meta.index = df_otu_count.index
 
         for level in tax_levels:
+            # no need for taxa qc, all taxa count
             res = _agg_along_axis(df_otu_count, df_tax[level], axis=1)
             meta_l = pd.merge(
                 df_meta,
                 _calc_alpha_metrics(res),
-                left_on="sample",
+                left_index=True,
                 right_index=True,
             )
             _, groups = zip(*[i for i in meta_l.groupby(sample_group_key)])
-            title_prefix = (
-                f"{level.upper() if level == 'otu' else level.capitalize()}"
-            )
-            for column_of_interest, title in zip(
+            title_prefix = f"{level.upper() if level == 'otu' else level.capitalize()}"
+            for column_of_interest, title, logy in zip(
                 ["shannon", "simpson", "richness", "chao1", "sequencing_depth"],
                 [
                     f"{title_prefix} Shannon entropy",
@@ -490,9 +604,10 @@ if __name__ == "__main__":
                     f"{title_prefix} Chao1 index",
                     "Library size",
                 ],
+                [False, False, False, False, True],
             ):
                 fig, axs = plt.subplots(
-                    1, len(groups), sharey=True, width_ratios=ratio, figsize=(7, 3)
+                    1, len(groups), sharey="row", width_ratios=ratio, figsize=(7, 3)
                 )
                 _barplot_with_whisker_strip(
                     groups,
@@ -502,7 +617,7 @@ if __name__ == "__main__":
                     column_of_interest=column_of_interest,
                     plot_strip=plot_strip,
                     axs=axs,
-                    ylog=column_of_interest in ["read_count"],
+                    ylog=logy,
                 )
                 fig.subplots_adjust(wspace=0.2)
                 fig.savefig(
