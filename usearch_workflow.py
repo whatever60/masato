@@ -116,13 +116,14 @@ def merge_pairs(
 
 
 def qc(
-    input_fastq: str, num_splits: int, num_threads: int = 16, backend="vsearch"
+    input_fastq: str, num_threads: int = 16, backend="vsearch"
 ) -> str:
     output_dir = os.path.dirname(input_fastq)
     filename = os.path.basename(input_fastq).split(".")[0]
     output_fastx = os.path.join(output_dir, f"{filename}.filtered.fastq.gz")
 
     if backend == "usearch":
+        num_splits = None
         # Split the merged FASTQ file into multiple pieces
         total_lines = int(subprocess.check_output(["wc", "-l", input_fastq]).split()[0])
         lines_per_file = ((total_lines + num_splits - 1) // num_splits // 4) * 4
@@ -923,13 +924,13 @@ def main():
     db_construct_parser.add_argument(
         "-i", "--input_fastq", help="Input FASTA file to construct the database from"
     )
-    db_construct_parser.add_argument(
-        "-s",
-        "--num_splits",
-        type=int,
-        help="Number of splits to split the FASTQ file into",
-        default=1,
-    )
+    # db_construct_parser.add_argument(
+    #     "-s",
+    #     "--num_splits",
+    #     type=int,
+    #     help="Number of splits to split the FASTQ file into",
+    #     default=1,
+    # )
     db_construct_parser.add_argument(
         "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
     )
@@ -1033,24 +1034,7 @@ def main():
 
     args = parser.parse_args()
 
-    if args.subcommand == "add_depth_to_metadata":
-        add_depth_to_metadata(args.fastq_dir, args.metadata_path)
-    elif args.subcommand == "subsample":
-        subsample(
-            args.fastq_dir,
-            args.metadata_path,
-            args.output_dir,
-            args.output_metadata_path,
-            args.num_subsamples,
-            args.mode,
-            args.seed,
-            args.metadata_only,
-        )
-    elif args.subcommand == "merge_pairs":
-        merge_pairs(args.fastq_dir, args.fastq_out, args.num_threads)
-    # elif args.subcommand == "qc":
-    #     qc(args.input_fastq, args.num_splits, args.num_threads)
-    elif args.subcommand == "db_construct":
+    if args.subcommand == "db_construct":
         fastx_post_qc = qc(args.input_fastq, args.num_splits, args.num_threads)
         db_construct(fastx_post_qc, args.num_threads)
     elif args.subcommand == "cluster_uparse":
@@ -1065,6 +1049,8 @@ def main():
         tax_nbc(args.input_fasta, args.db_fasta, args.output_path, args.num_threads)
     elif args.subcommand == "tax_sintax":
         tax_sintax(args.input_fastq, args.db_udb, args.output_path, args.num_threads)
+    else:
+        raise ValueError(f"Invalid subcommand: {args.subcommand}")
 
 
 if __name__ == "__main__":
