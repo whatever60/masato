@@ -97,7 +97,7 @@ def cat_fastq(
     output_fp_r1,
     output_fp_r2=None,
     metadata: str = None,
-    _remove_undet: bool = False,
+    _remove_undet: bool = True,
 ):
     """Process FASTQ files in the given directory, renaming reads,and write the output
     to the specified file pointers. Output fastq will be interleaved if `output_fp_r2`
