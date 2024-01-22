@@ -494,13 +494,14 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
         raise ValueError(f"Output fasta file {out_fasta} is a directory")
     output_dir = os.path.dirname(out_fasta)
     os.makedirs(output_dir, exist_ok=True)
+    # zotu_init = os.path.join(output_dir, f"_{out_fasta}")
     # vsearch does not have `--otutab`, `--otutab_stats`, `--calc_distmx`, and
     # `--cluster_aggd`. As suggested on the github issue
     #  (https://github.com/torognes/vsearch/issues/392), we use `--search_global`
     # to replace `--otutab`, but the other commands are not implemented.
     # Besides, in usearch chimera is removed as part of the clustering step, but
     # in vsearch chimera removal is a separate step.
-    unoise3_proc = subprocess.Popen(
+    subprocess.run(
         [
             "vsearch",
             "--cluster_unoise",
@@ -513,23 +514,19 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
             # "--strand",
             # "both",
         ],
-        stdout=subprocess.PIPE,
     )
-    uchime3_proc = subprocess.Popen(
+    subprocess.run(
         [
             "vsearch",
             "--uchime3_denovo",
-            # f"{output_dir}/temp.fa",
             "-",
             "--nonchimeras",
             out_fasta,
             "--relabel",
             "ZOTU",
         ],
-        stdin=unoise3_proc.stdout,
     )
-    unoise3_proc.stdout.close()
-    uchime3_proc.wait()
+    # os.remove(zotu_init)
 
 
 def _fq2fa(input_fastq: str, output_fasta: str) -> None:
@@ -546,14 +543,14 @@ def _fq2fa(input_fastq: str, output_fasta: str) -> None:
 
 def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: int):
     output_dir = os.path.dirname(input_fastq)
-    intermediate_fasta = os.path.join(output_dir, "_temp.fa.gz")
-    _fq2fa(input_fastq, intermediate_fasta)
+    # intermediate_fasta = os.path.join(output_dir, "_temp.fa.gz")
+    # _fq2fa(input_fastq, intermediate_fasta)
 
     subprocess.run(
         [
             "vsearch",
             "--usearch_global",
-            intermediate_fasta,
+            input_fastq,
             "--db",
             zotu_fasta,
             "--strand",
@@ -566,12 +563,6 @@ def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: in
             "1",
             "--otutabout",
             f"{output_dir}/unoise3_zotu.tsv",
-            # "--biomout",
-            # f"{output_dir}/unoise3_zotu.biom",
-            # "--alnout",
-            # f"{output_dir}/unoise3_zotu.aln",
-            # "--matched",
-            # f"{output_dir}/unoise3_zotu_matched.fa.gz",
             "--notmatched",
             f"{output_dir}/unoise3_zotu_notmatched.fa",
             # "--sizeout",
@@ -581,7 +572,7 @@ def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: in
     )
     subprocess.run(["pigz", "-f", f"{output_dir}/unoise3_zotu_notmatched.fa"])
 
-    os.remove(intermediate_fasta)
+    # os.remove(intermediate_fasta)
 
     # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
     # matched to anything in database
