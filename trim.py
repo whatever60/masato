@@ -200,6 +200,7 @@ def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
     """
     output_dir = os.path.dirname(output_fastq)
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "fastp"), exist_ok=True)
     fastp_proc = subprocess.Popen(
         [
             "fastp",
@@ -221,19 +222,19 @@ def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
             "--merged_out",
             output_fastq,
             "--unpaired1",
-            os.path.join(output_dir, "fastp.unpaired_R1.fastq.gz"),
+            os.path.join(output_dir, "fastp", "unpaired_R1.fastq.gz"),
             "--unpaired2",
-            os.path.join(output_dir, "fastp.unpaired_R2.fastq.gz"),
+            os.path.join(output_dir, "fastp", "unpaired_R2.fastq.gz"),
             "--failed_out",
-            os.path.join(output_dir, "fastp.failed.fastq.gz"),
+            os.path.join(output_dir, "fastp", "failed.fastq.gz"),
             "--out1",
-            os.path.join(output_dir, "fastp.unmerged_R1.fastq.gz"),
+            os.path.join(output_dir, "fastp", "unmerged_R1.fastq.gz"),
             "--out2",
-            os.path.join(output_dir, "fastp.unmerged_R2.fastq.gz"),
+            os.path.join(output_dir, "fastp", "unmerged_R2.fastq.gz"),
             "--html",  # report
-            os.path.join(output_dir, "fastp.report.html"),
+            os.path.join(output_dir, "fastp", "report.html"),
             "--json",
-            os.path.join(output_dir, "fastp.report.json"),
+            os.path.join(output_dir, "fastp", "report.json"),
         ],
         stdin=subprocess.PIPE,
         # stdout=subprocess.PIPE,
