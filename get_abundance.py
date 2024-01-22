@@ -183,10 +183,23 @@ def _taxa_qc(
     keep_rare: bool,
     keep_unknown: bool,
 ) -> pd.DataFrame:
-    # A taxon is rare if its relative abundance is consistently below the threshold across all samples.
-    rare_taxa = df_tax_rel_ab.columns[
-        (df_tax_rel_ab < rel_ab_thres).all(axis=0)
-    ].tolist()
+    """
+    A taxon is defined as rare:
+        When rel_ab_thres is a float, if its relative abundance is below the threshold 
+            in all samples.
+        When rel_ab_thres is an int, if the rank of its relative abundance is above 
+            the threshold in all samples.
+    """
+    if int(rel_ab_thres) == rel_ab_thres:
+        rare_taxa = df_tax_rel_ab.columns[
+            (df_tax_rel_ab.rank(axis=1, ascending=False, method="min") > rel_ab_thres).all(axis=0)
+        ].tolist()
+    else:
+        rare_taxa = df_tax_rel_ab.columns[
+            (df_tax_rel_ab < rel_ab_thres).all(axis=0)
+        ].tolist()
+    if "unknown" in rare_taxa:
+        rare_taxa.remove("unknown")
     if keep_rare:
         df_tax_rel_ab_rare = (
             df_tax_rel_ab[rare_taxa].sum(axis=1).to_frame(name="others")
@@ -202,9 +215,12 @@ def _taxa_qc(
 def read_tables(
     otu_count_table: str, metadata_path: str, otu_taxonomy_path: str
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    df_meta = pd.read_table(metadata_path, index_col="sample")
+    df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
     df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
+    df_tax.loc["unknown"] = "unknown"
+    df_tax.loc["unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
     df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
+    df_otu_count.rename({"ZOTU_UNKNOWN": "unknown"}, axis=0, inplace=True)
     # add missing samples with all zero counts
     missing_samples = list(set(df_meta.index) - set(df_otu_count.columns))
     if missing_samples:
@@ -221,11 +237,10 @@ def read_tables(
         )
     # only care about samples in metadata
     df_otu_count = df_otu_count[df_meta.index].T
-    df_meta["sequencing_depth"] = df_otu_count.sum(axis=1)
     # only care about OTUs with taxonomy
     common_otus = list(set(df_otu_count.columns).intersection(df_tax.index))
-    df_otu_count = df_otu_count.loc[:, common_otus]
     df_tax = df_tax.loc[common_otus]
+    df_otu_count = df_otu_count.loc[:, common_otus]
     df_tax["otu"] = df_tax.index
     return df_otu_count, df_meta, df_tax
 
@@ -273,6 +288,9 @@ def get_otu_count(
         sample_weight_key,
         spikein_taxa_key,
     )
+    df_meta["sequencing_depth"] = df_otu_count.sum(
+        axis=1
+    ) - df_meta.spikein_reads.to_numpy().clip(0)
     df_otu_count = df_otu_count.drop(
         find_spikein_otus(df_meta, df_tax, spikein_taxa_key, only_otus=True), axis=1
     )
@@ -343,7 +361,7 @@ if __name__ == "__main__":
     df_meta.to_csv(f"{output_dir}/metadata_sample.csv")
     df_otu_abs_ab = df_otu_count.div(df_meta.norm_factor, axis=0)
     df_otu_abs_ab.to_csv(f"{output_dir}/ab_abs_s_otu.csv")
-    
+
     df_otu_rel_ab = df_otu_count.div(df_otu_count.sum(axis=1), axis=0)
     df_otu_rel_ab_g = _agg_along_axis(df_otu_rel_ab, df_meta[rep_group_key], axis=0)
 

@@ -12,6 +12,7 @@ import pandas as pd
 from sklearn.decomposition import PCA
 from skbio.diversity import beta_diversity
 from skbio.stats.ordination import pcoa
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import seaborn as sns
@@ -20,6 +21,7 @@ from get_abundance import get_otu_count, _agg_along_axis
 
 # configure matplotlib PDF saving to use text instead of vector graphics
 plt.rcParams["pdf.fonttype"] = 42
+matplotlib.use("TkAgg")
 
 
 def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -113,7 +115,13 @@ def plot_dm(
     pc = pd.concat([pc, df_meta], axis=1)
 
     # markers = {"Bulk": "X", "Plate-R2A": "o", "Plate-TSA": "s"}
-    style_order = sorted(pc[style].unique().tolist())
+    if hue is None:
+        pc["_hue"] = "all"
+        hue = "_hue"
+    if style is None:
+        style_order = None
+    else:
+        style_order = sorted(pc[style].unique().tolist())
 
     fig, axs = plt.subplots(1, 2, figsize=(8, 3))
     sns.scatterplot(
@@ -143,15 +151,16 @@ def plot_dm(
     axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)")
     axs[1].set_ylabel(f"PC3 ({variance[2] * 100:.2f}%)")
 
-    # set legend markers under `hue` to o
-    hues = pc[hue].unique().tolist()
-    handles, labels = axs[1].get_legend_handles_labels()
-    for h, l in zip(handles, labels):
-        if l in hues:
-            # set marker size to s and marker to o
-            h.set_marker("o")
-        h.set_markersize(marker_size)
-    axs[1].legend(handles, labels)
+    if hue != "_hue":
+        # set legend markers under `hue` to o
+        hues = pc[hue].unique().tolist()
+        handles, labels = axs[1].get_legend_handles_labels()
+        for h, l in zip(handles, labels):
+            if l in hues:
+                # set marker size to s and marker to o
+                h.set_marker("o")
+            h.set_markersize(marker_size)
+        axs[1].legend(handles, labels)
 
     axs[1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
 
@@ -201,9 +210,9 @@ if __name__ == "__main__":
         help="Path to the metadata table",
         required=True,
     )
-    parser.add_argument("-t", "--otu_taxonomy_tsv", type=str)
+    parser.add_argument("-t", "--otu_taxonomy_tsv", type=str, required=True)
     parser.add_argument(
-        "-o",
+        "-f",
         "--fig_dir",
         help="Path to the output figure",
         required=True,
@@ -218,9 +227,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-r",
         "--rep_group_key",
+        default="rep_group",
         help="Column name in the metadata table to group replicates. If null, plot is "
         "generated without aggregating replicates.",
-        default=None,
     )
     parser.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
     parser.add_argument("-w", "--sample_weight_key", default="sample_weight", type=str)
@@ -252,6 +261,7 @@ if __name__ == "__main__":
         "--distance",
         help="Distance metric",
         required=True,
+        choices=["braycurtis", "euclid"],
     )
     parser.add_argument(
         "--hue",
@@ -302,21 +312,22 @@ if __name__ == "__main__":
         df_otu = df_otu_count.copy()
     else:
         raise ValueError(f"Unsupported transform: {transform}")
-    
+
     if rep_group_key is not None:
         df_otu = _agg_along_axis(df_otu, df_meta[rep_group_key], axis=0)
         df_meta = df_meta.groupby(rep_group_key).first()
     if log10:
         df_otu = np.log10(df_otu + 1e-8)
 
+    os.makedirs(fig_dir, exist_ok=True)
     for level in tax_levels:
         df_otu_tax = _agg_along_axis(df_otu, df_tax[level], axis=1)
         fig_path = os.path.join(
             fig_dir,
-            f"{distance}_{transform}_{'g' if rep_group_key else 's'}_{level}.png",
+            f"{distance}_{'log10_' if log10 else ''}{transform}_{'g' if rep_group_key is not None else 's'}_{level}.png",
         )
         plot_dm(
-            df_otu,
+            df_otu_tax,
             df_meta,
             fig_path,
             distance=distance,

@@ -78,7 +78,7 @@ def _stacked_bar(
         # set xticklabels size
         # ax.tick_params(axis="x", labelsize=6)
         # remove legend unless the last plot
-        if i != len(axs) - 1:
+        if i != len(axs[0]) - 1:
             ax.get_legend().remove()
         else:
             ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
@@ -130,7 +130,8 @@ def _heatmap(
             cbar_ax = None
             cbar_kws = None
 
-        df, linked = _get_dendrogram(df)
+        if ax_dend is not None:
+            df, linked = _get_dendrogram(df)
         sns.heatmap(
             df,
             ax=ax,
@@ -150,6 +151,8 @@ def _heatmap(
             )
             ax_dend.axis("off")
             ax_dend.set_title(name)
+        else:
+            ax.set_title(name)
 
         # turn off y axis ticks and tick labels (set invisible) except for the first panel
         if i == 0:
@@ -335,14 +338,13 @@ def _rarefying(
         delayed(rarefy_array)(df.iloc[idx].to_numpy(), n, repeat_num)
         for idx, n in enumerate(ref)
     )
-    res = np.concatenate(res, axis=0)
     sample_names_new_orig = [
         (f"{sample_name}_rarefied_{j}", sample_name)
         for idx, sample_name in enumerate(df.index)
-        for j in range(repeat_num if ref[idx] != depth[idx] else 1)
+        for j in range(res[idx].shape[0])
     ]
-    idx_new = [i[0] for i in sample_names_new_orig]
-    idx_orig = [i[1] for i in sample_names_new_orig]
+    res = np.concatenate(res, axis=0)
+    idx_new, idx_orig = zip(*sample_names_new_orig)
     return pd.DataFrame(res, index=idx_new, columns=df.columns), idx_orig
 
 
@@ -374,9 +376,9 @@ if __name__ == "__main__":
         type=str,
         choices=["stacked_bar", "heatmap", "heatmap_log10", "all"],
     )
-    parser_ab.add_argument("-i", "--otu_count_tsv", type=str)
-    parser_ab.add_argument("-m", "--metadata", type=str)
-    parser_ab.add_argument("-t", "--otu_taxonomy_tsv", type=str)
+    parser_ab.add_argument("-i", "--otu_count_tsv", type=str, required=True)
+    parser_ab.add_argument("-m", "--metadata", type=str, required=True)
+    parser_ab.add_argument("-t", "--otu_taxonomy_tsv", type=str, required=True)
     parser_ab.add_argument("-f", "--fig_dir", type=str, required=True)
     parser_ab.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_ab.add_argument("-s", "--sample_group_key", type=str, default="sample_group")
@@ -394,7 +396,7 @@ if __name__ == "__main__":
     )
     parser_ab.add_argument(
         "-sc",
-        "--smaple_hierarchical_clustering",
+        "--sample_hierarchical_clustering",
         action="store_true",
         default=False,
         help="Perform hierarchical clustering on samples in each group, order them "
@@ -440,14 +442,14 @@ if __name__ == "__main__":
         spikein_taxa_key=spikein_taxa_key,
     )
 
-    names, groups = zip(*[i for i in df_meta.groupby(sample_group_key)])
+    names, groups = zip(*[i for i in df_meta.groupby(sample_group_key, sort=False)])
     ratio = [i[rep_group_key].nunique() for i in groups]
     os.makedirs(fig_dir, exist_ok=True)
 
     if args.command == "abundance_group":
         rel_ab_thresholds = args.rel_ab_thresholds
         plot_type = args.plot_type
-        sample_hierarchical_clustering = args.smaple_hierarchical_clustering
+        sample_hierarchical_clustering = args.sample_hierarchical_clustering
 
         # process into relative abundance and aggregate at replication group level
         df_otu_rel_ab_g = _agg_along_axis(
@@ -464,7 +466,7 @@ if __name__ == "__main__":
                 _agg_along_axis(df_otu_rel_ab_g, df_tax[level], axis=1),
                 rel_ab_thres,
                 keep_rare=True,
-                keep_unknown=True,
+                keep_unknown=False,
             )
             res = res[sorted(res.columns)]
             res_group_list = [
@@ -503,18 +505,21 @@ if __name__ == "__main__":
             if plot_type in ["heatmap", "heatmap_log10", "all"]:
                 size = (
                     res.shape[0] // (res.shape[0] / width),
-                    res.shape[1] // (res.shape[0] / width * 1.3),
+                    res.shape[1] // (res.shape[0] / width),
                 )
-                if sample_hierarchical_clustering:
-                    fig, axs = _get_subplots(num_cols, size, ratio)
-                else:
-                    fig, axs = _get_subplots(num_cols, size, ratio, height_ratios=None)
                 if plot_type in ["heatmap_log10", "all"]:
+                    if sample_hierarchical_clustering:
+                        fig, axs = _get_subplots(num_cols, size, ratio)
+                    else:
+                        fig, axs = _get_subplots(
+                            num_cols, size, ratio, height_ratios=None
+                        )
+                    pesudo_abundance = 1e-4
                     _heatmap(
-                        [np.log10(res_group + 1e-4).T for res_group in res_group_list],
+                        [np.log10(res_group + pesudo_abundance).T for res_group in res_group_list],
                         names,
                         title=f"Taxonomy at {level} level",
-                        cbar_label="log10(relative abundance + 1e-4)",
+                        cbar_label=f"log10(relative abundance + {pesudo_abundance:.0e})",
                         axs=axs,
                         cmap="rocket_r",
                     )
@@ -529,6 +534,12 @@ if __name__ == "__main__":
                         dpi=300,
                     )
                 if plot_type in ["heatmap", "all"]:
+                    if sample_hierarchical_clustering:
+                        fig, axs = _get_subplots(num_cols, size, ratio)
+                    else:
+                        fig, axs = _get_subplots(
+                            num_cols, size, ratio, height_ratios=None
+                        )
                     _heatmap(
                         [res_group.T for res_group in res_group_list],
                         names,
@@ -572,19 +583,26 @@ if __name__ == "__main__":
                     ref.append(depth[i])
                 elif isinstance(i, int):
                     ref.append(i)
-                elif i is None:
+                elif np.isnan(i):
                     ref.append(rarefying_value)
                 else:
-                    raise ValueError(f"Unknown value for rarefying_key: {rarefying_key}")
+                    raise ValueError(
+                        f"Unknown data type for rarefying_key: {i} ({type(i)})"
+                    )
             # rarefy
             df_otu_count, names_orig = _rarefying(
                 df_otu_count, ref, args.rarefying_repeat
             )
+            # NOTE:
+            # Must create the dummy dataframe as a column, cannot be empty dataframe 
+            # with index, otherwise order of merged dataframe index will be slightly
+            # wrong.
             df_meta = pd.merge(
-                pd.DataFrame(index=names_orig),
+                pd.DataFrame({"original_sample_name": names_orig}),
                 df_meta,
-                left_index=True,
+                left_on="original_sample_name",
                 right_index=True,
+                validate="many_to_one",
             ).reset_index(names=df_meta.index.name)
             df_meta.index = df_otu_count.index
 
@@ -597,7 +615,7 @@ if __name__ == "__main__":
                 left_index=True,
                 right_index=True,
             )
-            _, groups = zip(*[i for i in meta_l.groupby(sample_group_key)])
+            _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
             title_prefix = f"{level.upper() if level == 'otu' else level.capitalize()}"
             for column_of_interest, title, logy in zip(
                 ["shannon", "simpson", "richness", "chao1", "sequencing_depth"],
@@ -611,7 +629,7 @@ if __name__ == "__main__":
                 [False, False, False, False, True],
             ):
                 fig, axs = plt.subplots(
-                    1, len(groups), sharey="row", width_ratios=ratio, figsize=(7, 3)
+                    1, len(groups), sharey="row", width_ratios=ratio, figsize=(12, 3)
                 )
                 _barplot_with_whisker_strip(
                     groups,
@@ -623,14 +641,14 @@ if __name__ == "__main__":
                     axs=axs,
                     ylog=logy,
                 )
-                fig.subplots_adjust(wspace=0.2)
+                fig.subplots_adjust(wspace=0.05)
                 fig.savefig(
-                    f"{fig_dir}/{column_of_interest}_sample_{level}.png",
+                    f"{fig_dir}/{column_of_interest}_{level}.png",
                     bbox_inches="tight",
                     dpi=300,
                 )
                 fig.savefig(
-                    f"{fig_dir}/{column_of_interest}_sample_{level}.pdf",
+                    f"{fig_dir}/{column_of_interest}_{level}.pdf",
                     bbox_inches="tight",
                     dpi=300,
                 )

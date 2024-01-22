@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import shutil
+import gzip
 
 import numpy as np
 import pandas as pd
@@ -115,12 +116,10 @@ def merge_pairs(
         shutil.rmtree(f"{output_dir}/temp")
 
 
-def qc(
-    input_fastq: str, num_threads: int = 16, backend="vsearch"
-) -> str:
+def qc(input_fastq: str, num_threads: int = 16, backend="vsearch") -> str:
     output_dir = os.path.dirname(input_fastq)
     filename = os.path.basename(input_fastq).split(".")[0]
-    output_fastx = os.path.join(output_dir, f"{filename}.filtered.fastq.gz")
+    output_fastx = os.path.join(output_dir, f"{filename}.filtered.fastq")
 
     if backend == "usearch":
         num_splits = None
@@ -206,6 +205,8 @@ def qc(
                 # str(num_threads),
             ]
         )
+        subprocess.run(["pigz", "-f", output_fastx])
+        output_fastx += ".gz"
     return output_fastx
 
 
@@ -407,37 +408,11 @@ def db_construct(input_fastx, num_threads: int, backend: str = "vsearch"):
                 "--fastx_uniques",
                 input_fastx,
                 "--fastaout",
-                f"{output_dir}/{base_name_noext}.uniq.fa.gz",
+                f"{output_dir}/{base_name_noext}.uniq.fa",
                 "--sizeout",
             ]
         )
-        # subprocess.run(
-        #     [
-        #         "vsearch",
-        #         "--sortbysize",
-        #         f"{output_dir}/{base_name_noext}.uniq.fa",
-        #         "--output",
-        #         f"{output_dir}/{base_name_noext}.sorted.fa",
-        #         # subsequent clustering/denoising will apply threshold, so not necessary to do it here.
-        #         # "--minsize",
-        #         # "2",
-        #     ]
-        # )
-        # subprocess.run(
-        #     [
-        #         "vsearch",
-        #         "--search_exact",
-        #         input_fastx,
-        #         "--db",
-        #         f"{output_dir}/{base_name_noext}.sorted.fa",
-        #         "--strand",
-        #         "both",
-        #         "--notmatched",
-        #         f"{output_dir}/{base_name_noext}.unmatched.fa",
-        #         "--threads",
-        #         str(num_threads),
-        #     ]
-        # )
+        subprocess.run(["pigz", "-f", f"{output_dir}/{base_name_noext}.uniq.fa"])
 
 
 def cluster_uparse(
@@ -557,18 +532,28 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
     uchime3_proc.wait()
 
 
+def _fq2fa(input_fastq: str, output_fasta: str) -> None:
+    """Convert fastq (could be gzipped) to output fasta (gzipped) using seqtk"""
+    try:
+        # Constructing the seqtk command
+        command = f"seqtk seq -a {input_fastq} | pigz -f > {output_fasta}"
+
+        # Executing the command
+        subprocess.run(command, shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Error executing command: {e.stderr}")
+
+
 def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: int):
     output_dir = os.path.dirname(input_fastq)
-    # with open(f"{os.path.splitext(input_fastq)[0]}.fa", "w") as f:
-    seqtk_proc = subprocess.Popen(
-        ["seqtk", "seq", "-A", input_fastq], stdout=subprocess.PIPE
-    )
-    search_proc = subprocess.Popen(
+    intermediate_fasta = os.path.join(output_dir, "_temp.fa.gz")
+    _fq2fa(input_fastq, intermediate_fasta)
+
+    subprocess.run(
         [
             "vsearch",
             "--usearch_global",
-            # f"{os.path.splitext(input_fastq)[0]}.fa",
-            "-",
+            intermediate_fasta,
             "--db",
             zotu_fasta,
             "--strand",
@@ -588,24 +573,25 @@ def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: in
             # "--matched",
             # f"{output_dir}/unoise3_zotu_matched.fa.gz",
             "--notmatched",
-            f"{output_dir}/unoise3_zotu_notmatched.fa.gz",
+            f"{output_dir}/unoise3_zotu_notmatched.fa",
             # "--sizeout",
             "--threads",
             str(num_threads),
         ],
-        stdin=seqtk_proc.stdout,
     )
-    seqtk_proc.stdout.close()
-    search_proc.wait()
+    subprocess.run(["pigz", "-f", f"{output_dir}/unoise3_zotu_notmatched.fa"])
+
+    os.remove(intermediate_fasta)
 
     # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
     # matched to anything in database
     zotu_table = pd.read_table(f"{output_dir}/unoise3_zotu.tsv", index_col=0)
     counter = {i: 0 for i in zotu_table.columns}
-    for record in SeqIO.parse(f"{output_dir}/unoise3_zotu_notmatched.fa.gz", "fasta"):
-        counter[record.id.split("=")[1]] += 1
+    with gzip.open(f"{output_dir}/unoise3_zotu_notmatched.fa.gz", "rt") as f:
+        for record in SeqIO.parse(f, "fasta"):
+            counter[record.id.split("=")[1]] += 1
     zotu_table.loc["ZOTU_UNKNOWN"] = pd.Series(counter)
-    zotu_table.to_csv(f"{output_dir}/unoise3_zotu.tsv", sep="\t")   
+    zotu_table.to_csv(f"{output_dir}/unoise3_zotu.tsv", sep="\t")
 
 
 def _cluster_unoise3(
@@ -1035,14 +1021,14 @@ def main():
     args = parser.parse_args()
 
     if args.subcommand == "db_construct":
-        fastx_post_qc = qc(args.input_fastq, args.num_splits, args.num_threads)
+        fastx_post_qc = qc(args.input_fastq, args.num_threads)
         db_construct(fastx_post_qc, args.num_threads)
     elif args.subcommand == "cluster_uparse":
         cluster_uparse(
             args.input_fastq, args.db_fasta, args.output_dir, args.num_threads
         )
     elif args.subcommand == "cluster_unoise3":
-            (args.uniq_fasta, args.minsize, args.out_fasta)
+        cluster_unoise3(args.uniq_fasta, args.minsize, args.out_fasta)
     elif args.subcommand == "search_global":
         search_global(args.input_fastq, args.zotu_fasta, args.id, args.num_threads)
     elif args.subcommand == "tax_nbc":
