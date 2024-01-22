@@ -178,20 +178,6 @@ def cat_fastq(
                 )
 
 
-# def reads_in_four(iterable: Iterator[str]) -> Iterator[tuple[str, str, str, str]]:
-#     """
-#     Yield groups of four lines from the given iterable.
-
-#     Args:
-#         iterable: An iterator from which to read lines.
-
-#     Returns:
-#         An iterator of tuples, each containing four lines.
-#     """
-#     iters = [iter(iterable)] * 4
-#     return zip(*iters)
-
-
 def rename_read(
     header_line: str, sample_name: str, read_number: int, read_index: int
 ) -> str:
@@ -211,10 +197,3 @@ def rename_read(
     original_header = header_line.strip().split()[0][1:]
     new_header = f"@sample={sample_name} {original_header} {read_number} {read_index}\n"
     return new_header
-
-
-# Example usage
-# process_fastq('/path/to/directory', sys.stdout)
-# or to write to a file:
-# with open('output.fastq', 'w') as output_file:
-#     process_fastq('/path/to/directory', output_file)

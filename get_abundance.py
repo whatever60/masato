@@ -185,14 +185,16 @@ def _taxa_qc(
 ) -> pd.DataFrame:
     """
     A taxon is defined as rare:
-        When rel_ab_thres is a float, if its relative abundance is below the threshold 
+        When rel_ab_thres is a float, if its relative abundance is below the threshold
             in all samples.
-        When rel_ab_thres is an int, if the rank of its relative abundance is above 
+        When rel_ab_thres is an int, if the rank of its relative abundance is above
             the threshold in all samples.
     """
     if int(rel_ab_thres) == rel_ab_thres:
         rare_taxa = df_tax_rel_ab.columns[
-            (df_tax_rel_ab.rank(axis=1, ascending=False, method="min") > rel_ab_thres).all(axis=0)
+            (
+                df_tax_rel_ab.rank(axis=1, ascending=False, method="min") > rel_ab_thres
+            ).all(axis=0)
         ].tolist()
     else:
         rare_taxa = df_tax_rel_ab.columns[

@@ -67,4 +67,3 @@ if __name__ == "__main__":
     # Process each row
     df_res = df.apply(parse_taxonomy_line, axis=1)
     df_res.to_csv(output_path, sep="\t", index=False)
-

@@ -187,16 +187,15 @@ def run_fastp_cutadapt(
     fastp_proc.wait()
 
 
-
 def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
-    """Given a directory of fastq files, perform renaming, quality trimming, adapter 
-    trimming and length filtering using just python and fastp. fastp takes interleaved 
+    """Given a directory of fastq files, perform renaming, quality trimming, adapter
+    trimming and length filtering using just python and fastp. fastp takes interleaved
     input from stdin, to which we write the renamed and interleaved paired-end reads.
-    
+
     Note:
-    - Adapter sequences are optional since fastp can trim paired-end reads by overlap 
+    - Adapter sequences are optional since fastp can trim paired-end reads by overlap
         analysis, which is more versatile and robust.
-    - fastp can also merge pairs, but we don't do it here but with the following ZOTU 
+    - fastp can also merge pairs, but we don't do it here but with the following ZOTU
         pipeline, just to be more coherent.
     """
     output_dir = os.path.dirname(output_fastq)
@@ -214,21 +213,6 @@ def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
             "-w",  # number of threads
             "8",
             # don't trim, so that amplicons have uniform length, as suggested by Edgar
-            # "--cut_front",
-            # "--cut_tail",
-            # "--cut_right",
-            # "--cut_front_window_size",
-            # "1",
-            # "--cut_front_mean_quality",
-            # "3",
-            # "--cut_tail_window_size",
-            # "1",
-            # "--cut_tail_mean_quality",
-            # "3",
-            # "--cut_right_window_size",
-            # "4",
-            # "--cut_right_mean_quality",
-            # "15",
             "--length_required",
             "100",
             # if you don't want to merge, modify the following arguments
@@ -367,7 +351,10 @@ if __name__ == "__main__":
         "-i", "--input_dir", type=str, help="Input directory containing FASTQ files"
     )
     parser.add_argument(
-        "-o", "--output_fastq", type=str, help="Output FASTQ file path, could be gzipped"
+        "-o",
+        "--output_fastq",
+        type=str,
+        help="Output FASTQ file path, could be gzipped",
     )
     args = parser.parse_args()
 

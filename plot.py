@@ -22,20 +22,6 @@ matplotlib.use("TkAgg")
 plt.rcParams["pdf.fonttype"] = 42
 
 
-def _get_color_palette(
-    df: pd.DataFrame, group_key: str, column_of_interest: int, cmap: str = "viridis"
-) -> dict:
-    """Take a pandas dataframe, and return a dictionary mapping group to color. We
-    expect the column of interest to be a continuous variable, and we will map each
-    group to a color by its mean value of the column of interest.
-    """
-    mean = meta.groupby(group_key, sort=False)[column_of_interest].mean().reset_index()
-    mean = mean.sort_values(by="richness")
-    palette = sns.color_palette(cmap, n_colors=len(mean))
-    color_map = {group: palette[i] for i, group in enumerate(mean[group_key])}
-    return color_map
-
-
 def _get_dendrogram(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """Perform hierarchical clustering on the dataframe (treating column as samples and
     row as features), reorder the columns and get the dendrogram.
@@ -516,7 +502,10 @@ if __name__ == "__main__":
                         )
                     pesudo_abundance = 1e-4
                     _heatmap(
-                        [np.log10(res_group + pesudo_abundance).T for res_group in res_group_list],
+                        [
+                            np.log10(res_group + pesudo_abundance).T
+                            for res_group in res_group_list
+                        ],
                         names,
                         title=f"Taxonomy at {level} level",
                         cbar_label=f"log10(relative abundance + {pesudo_abundance:.0e})",
@@ -594,7 +583,7 @@ if __name__ == "__main__":
                 df_otu_count, ref, args.rarefying_repeat
             )
             # NOTE:
-            # Must create the dummy dataframe as a column, cannot be empty dataframe 
+            # Must create the dummy dataframe as a column, cannot be empty dataframe
             # with index, otherwise order of merged dataframe index will be slightly
             # wrong.
             df_meta = pd.merge(

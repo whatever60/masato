@@ -850,47 +850,6 @@ def main():
     parser = argparse.ArgumentParser(description="Perform QC on FASTQ files")
     subparsers = parser.add_subparsers(dest="subcommand")
 
-    # add depth subcommand
-    add_depth_to_metadata_parser = subparsers.add_parser(
-        "add_depth_to_metadata", help="Add read depth to metadata file"
-    )
-    add_depth_to_metadata_parser.add_argument(
-        "-i", "--fastq_dir", help="Input directory containing paired-end fastq files"
-    )
-    add_depth_to_metadata_parser.add_argument(
-        "-m", "--metadata_path", help="Path to metadata file"
-    )
-
-    # Subsample subcommand
-    subsample_parser = subparsers.add_parser(
-        "subsample", help="Subsample input FASTQ files"
-    )
-    subsample_parser.add_argument(
-        "-i", "--fastq_dir", help="Input directory containing paired-end fastq files"
-    )
-    subsample_parser.add_argument("-m", "--metadata_path", help="Path to metadata file")
-    subsample_parser.add_argument(
-        "-o", "--output_dir", help="Output directory for subsampled fastq files"
-    )
-    subsample_parser.add_argument(
-        "-om", "--output_metadata_path", help="Output metadata file"
-    )
-    subsample_parser.add_argument(
-        "-n", "--num_subsamples", type=int, help="Number of subsamples to generate"
-    )
-    subsample_parser.add_argument(
-        "--mode",
-        choices=["reference", "min"],
-        default="reference",
-        help="Subsampling mode",
-    )
-    subsample_parser.add_argument(
-        "-s", "--seed", type=int, default=100, help="Random seed"
-    )
-    subsample_parser.add_argument(
-        "--metadata_only", action="store_true", help="Only generate metadata"
-    )
-
     merge_pairs_parser = subparsers.add_parser(
         "merge_pairs", help="Merge paired-end reads"
     )
@@ -910,13 +869,6 @@ def main():
     db_construct_parser.add_argument(
         "-i", "--input_fastq", help="Input FASTA file to construct the database from"
     )
-    # db_construct_parser.add_argument(
-    #     "-s",
-    #     "--num_splits",
-    #     type=int,
-    #     help="Number of splits to split the FASTQ file into",
-    #     default=1,
-    # )
     db_construct_parser.add_argument(
         "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
     )
@@ -953,23 +905,6 @@ def main():
     cluster_unoise3_parser.add_argument(
         "-o", "--out_fasta", help="Output path for ZOTU fasta file"
     )
-    # cluster_unoise3_parser.add_argument(
-    #     "-d", "--db_fasta", help="Input FASTA file to cluster against", type=str
-    # )
-    # cluster_unoise3_parser.add_argument(
-    #     "--id", type=float, default=0.97, help="Minimum cluster identity"
-    # )
-    # cluster_unoise3_parser.add_argument(
-    #     "-o",
-    #     "--output_dir",
-    #     help="Output directory for UNOISE3 results",
-    #     type=str,
-    #     default=None,
-    # )
-    # cluster_unoise3_parser.add_argument(
-    #     "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
-    # )
-
     search_global_parser = subparsers.add_parser(
         "search_global", help="Search reads against a database"
     )

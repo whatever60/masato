@@ -198,8 +198,7 @@ if not keep_unknown:
     tax_table = tax_table.filter(pl.col(tax_level) != "unknown")
 
 tax_table = (
-    tax_table
-    .pivot(
+    tax_table.pivot(
         index=group_key,
         columns=tax_level,
         values="rel_ab",
