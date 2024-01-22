@@ -28,19 +28,19 @@ def parse_taxonomy_line(row):
     result = {
         "otu": row[0],
         "domain": "unknown",
-        "domain_p": "unknown",
+        "domain_p": -1,
         "phylum": "unknown",
-        "phylum_p": "unknown",
+        "phylum_p": -1,
         "class": "unknown",
-        "class_p": "unknown",
+        "class_p": -1,
         "order": "unknown",
-        "order_p": "unknown",
+        "order_p": -1,
         "family": "unknown",
-        "family_p": "unknown",
+        "family_p": -1,
         "genus": "unknown",
-        "genus_p": "unknown",
+        "genus_p": -1,
         "species": "unknown",
-        "species_p": "unknown",
+        "species_p": -1,
     }
 
     # Populate the result dictionary with the provided data
