@@ -2,6 +2,7 @@
 
 import glob
 import os
+import shutil
 import subprocess
 import argparse
 
@@ -10,10 +11,15 @@ from Bio.Seq import Seq
 from utils import cat_fastq
 
 
-PRIMER_ITS_5 = "ACCTGCGGARGGATCA"
-PRIMER_ITS_7 = "GAGATCCRTTGYTRAAAGTT"
-PRIMER_16S_5 = "GTGYCAGCMGCCGCGGTAA"
-PRIMER_16S_7 = "GGACTACNVGGGTWTCTAAT"
+PRIMER_ITS_5 = "GTACCTGCGGARGGATCA"
+PRIMER_ITS_7 = "ATGAGATCCRTTGYTRAAAGTT"
+PRIMER_16S_5 = "GTGTGYCAGCMGCCGCGGTAA"
+PRIMER_16S_7 = "CCGGACTACNVGGGTWTCTAAT"
+
+
+def get_rc(seq: str) -> str:
+    """Return the reverse complement of the given sequence."""
+    return str(Seq(seq).reverse_complement())
 
 
 def run_trim_galore(input_dir, output_dir, pair):
@@ -162,17 +168,9 @@ def run_fastp_cutadapt(
         [
             "cutadapt",
             "-a",
-            str(
-                Seq(
-                    PRIMER_ITS_7 if amplicon_type == "ITS" else PRIMER_16S_7
-                ).reverse_complement()
-            ),
+            get_rc(PRIMER_ITS_7 if amplicon_type == "ITS" else PRIMER_16S_7),
             "-A",
-            str(
-                Seq(
-                    PRIMER_ITS_5 if amplicon_type == "ITS" else PRIMER_16S_5
-                ).reverse_complement()
-            ),
+            get_rc(PRIMER_ITS_5 if amplicon_type == "ITS" else PRIMER_16S_5),
             "-o",
             output_fastq_1,
             "-p",
@@ -242,6 +240,146 @@ def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
     cat_fastq(fastq_dir, output_fp_r1=fastp_proc.stdin, output_fp_r2=fastp_proc.stdin)
     fastp_proc.stdin.close()
     fastp_proc.wait()
+
+
+def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
+    # Step 1: Resolve absolute path of the patterns file
+    patterns_file_abs = os.path.abspath(patterns_file)
+
+    # Save the current working directory
+    original_dir = os.getcwd()
+
+    # Step 2: Change to the temporary directory
+    os.chdir(file_dir)
+
+    # Step 3: Execute the mmv command
+    with open(patterns_file_abs, "r") as file:
+        subprocess.run(["mmv", "-d"], stdin=file)
+
+    # Step 4: Change back to the original directory
+    os.chdir(original_dir)
+
+
+def isolate_150_preprocess(
+    fastq_dir: str,
+    barcode_fwd_fasta: str,
+    barcode_rev_fasta: str,
+    rename_pattern: str,
+    output_fastq: str,
+    primer_set: str,
+) -> None:
+    output_dir, output_f = os.path.split(output_fastq)
+    output_dir_demux = os.path.join(output_dir, "demux")
+    output_dir_demux_fail = os.path.join(output_dir, "demux_failed")
+    output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
+    output_fastq_r1 = "_R1.".join(output_f.split(".", 1))
+    output_fastq_r2 = "_R2.".join(output_f.split(".", 1))
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir_demux, exist_ok=True)
+    os.makedirs(output_dir_demux_fail, exist_ok=True)
+    os.makedirs(output_dir_cutadapt, exist_ok=True)
+
+    # demultiplex with cutadapt
+    cutadapt_demux_proc = subprocess.Popen(
+        [
+            "cutadapt",
+            "-e",
+            "0.15",
+            "--no-indels",
+            "-g",
+            f"^file:{barcode_fwd_fasta}",
+            "-G",
+            f"^file:{barcode_rev_fasta}",
+            "-o",
+            os.path.join(output_dir_demux, "{name1}-{name2}_R1.fq.gz"),
+            "-p",
+            os.path.join(output_dir_demux, "{name1}-{name2}_R2.fq.gz"),
+            "--interleaved",
+            "-",
+        ],
+        stdin=subprocess.PIPE,
+        # silence cutadapt's output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    cat_fastq(
+        fastq_dir,
+        output_fp_r1=cutadapt_demux_proc.stdin,
+        output_fp_r2=cutadapt_demux_proc.stdin,
+    )
+    cutadapt_demux_proc.stdin.close()
+    cutadapt_demux_proc.wait()
+    rename_files_with_mmv(output_dir_demux, rename_pattern)
+
+    # move all remaining files (whose name1 or name2 is "unknown") to output_dir/demux_failed
+    demux_failed_files = list(set(
+        glob.glob(os.path.join(output_dir_demux, "*-unknown_R1.fq.gz"))
+        + glob.glob(os.path.join(output_dir_demux, "*-unknown_R2.fq.gz"))
+        + glob.glob(os.path.join(output_dir_demux, "unknown-*_R1.fq.gz"))
+        + glob.glob(os.path.join(output_dir_demux, "unknown-*_R2.fq.gz"))
+    ))
+    subprocess.run(
+        [
+            "mv",
+            *demux_failed_files,
+            os.path.join(output_dir, "demux_failed"),
+        ]
+    )
+
+    # trim with cutadapt
+    if primer_set == "its":
+        i5, i7 = PRIMER_ITS_5, PRIMER_ITS_7
+    elif primer_set == "16s":
+        i5, i7 = PRIMER_16S_5, PRIMER_16S_7
+    else:
+        raise ValueError("Invalid primer set. Must be either its or 16s.")
+    a = f"{i5}...{get_rc(i7)}"
+    A = f"{i7}...{get_rc(i5)}"
+    cutadapt_trim_proc = subprocess.Popen(
+        [
+            "cutadapt",
+            "-a",
+            a,
+            "-A",
+            A,
+            "--minimum-length",
+            "100",
+            "--pair-filter",
+            "first",
+            "-o",
+            os.path.join(output_dir_cutadapt, output_fastq_r1),
+            "-p",
+            os.path.join(output_dir_cutadapt, output_fastq_r2),
+            "--untrimmed-output",
+            os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
+            "--untrimmed-paired-output",
+            os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
+            "--too-short-output",
+            os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
+            "--too-short-paired-output",
+            os.path.join(output_dir_cutadapt, "too_short_2.fq.gz"),
+            "--cores",
+            "4",
+            "--interleaved",
+            "-",
+        ],
+        stdin=subprocess.PIPE,
+        # silence cutadapt's output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    cat_fastq(
+        output_dir_demux,
+        output_fp_r1=cutadapt_trim_proc.stdin,
+        output_fp_r2=cutadapt_trim_proc.stdin,
+        _have_sample_name=True,
+    )
+    cutadapt_trim_proc.stdin.close()
+    cutadapt_trim_proc.wait()
+
+    # copy merged_1 to output_fastq
+    shutil.copy(os.path.join(output_dir_cutadapt, output_fastq_r1), output_fastq)
+    shutil.rmtree(output_dir_demux)
 
 
 def merge(fastq_dir: str, output_dir: str) -> None:
@@ -349,14 +487,62 @@ if __name__ == "__main__":
         description="Process and rename FASTQ files using trim_galore."
     )
     parser.add_argument(
-        "-i", "--input_dir", type=str, help="Input directory containing FASTQ files"
+        "-i",
+        "--input_dir",
+        type=str,
+        help="Input directory containing FASTQ files",
+        required=True,
     )
     parser.add_argument(
         "-o",
-        "--output_fastq",
+        "--output",
         type=str,
-        help="Output FASTQ file path, could be gzipped",
+        help="Output FASTQ file (could be gzipped) path or directory",
+        required=True,
+    )
+    parser.add_argument(
+        "-p",
+        "--primer_set",
+        type=str,
+        choices=["its", "16s"],
+        help="Primer set used",
+    )
+    parser.add_argument(
+        "-fb",
+        "--barcode_fwd",
+        type=str,
+        help="Barcode fasta file for forward reads",
+    )
+    parser.add_argument(
+        "-rb",
+        "--barcode_rev",
+        type=str,
+        help="Barcode fasta file for reverse reads",
+    )
+    parser.add_argument(
+        "-pt",
+        "--pattern",
+        type=str,
+        help="Pattern file for mmv, used to rename the files",
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        type=str,
+        choices=["simple", "isolate_150"],
+        default="simple",
+        help="Processing mode",
     )
     args = parser.parse_args()
 
-    simple_preprocess(args.input_dir, args.output_fastq)
+    if args.mode == "simple":
+        simple_preprocess(args.input_dir, args.output_fastq)
+    elif args.mode == "isolate_150":
+        isolate_150_preprocess(
+            args.input_dir,
+            args.barcode_fwd,
+            args.barcode_rev,
+            args.pattern,
+            args.output,
+            primer_set=args.primer_set,
+        )
