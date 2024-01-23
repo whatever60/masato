@@ -86,6 +86,7 @@ def plot_dm(
     df_meta: pd.DataFrame,
     fig_path: str,
     distance: str,
+    title: str = None,
     hue: str = None,
     style: str = None,
     plot_ellipses: bool = False,
@@ -107,9 +108,7 @@ def plot_dm(
         )
         variance = pc_obj.explained_variance_ratio_
     else:
-        raise ValueError(
-            f"Unsupported distance metric: {distance}, select from 'braycurtis' or 'euclid'."
-        )
+        raise NotImplementedError(f"Unsupported distance metric: {distance}")
 
     marker_size = 8
     pc = pd.concat([pc, df_meta], axis=1)
@@ -123,7 +122,9 @@ def plot_dm(
     else:
         style_order = sorted(pc[style].unique().tolist())
 
-    fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+    axis_label_fs = 14
+    title_fs = 16
+    fig, axs = plt.subplots(1, 2, figsize=(8, 4))
     sns.scatterplot(
         data=pc,
         x="PC1",
@@ -134,8 +135,8 @@ def plot_dm(
         legend=False,
         ax=axs[0],
     )
-    axs[0].set_xlabel(f"PC1 ({variance[0] * 100:.2f}%)")
-    axs[0].set_ylabel(f"PC2 ({variance[1] * 100:.2f}%)")
+    axs[0].set_xlabel(f"PC1 ({variance[0] * 100:.2f}%)", fontsize=axis_label_fs)
+    axs[0].set_ylabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
 
     sns.scatterplot(
         data=pc,
@@ -148,8 +149,13 @@ def plot_dm(
         linewidth=0,
         ax=axs[1],
     )
-    axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)")
-    axs[1].set_ylabel(f"PC3 ({variance[2] * 100:.2f}%)")
+    axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
+    axs[1].set_ylabel(f"PC3 ({variance[2] * 100:.2f}%)", fontsize=axis_label_fs)
+    # set axis to be square
+    for ax in axs:
+        xleft, xright = ax.get_xlim()
+        ybottom, ytop = ax.get_ylim()
+        ax.set_aspect(abs((xright - xleft) / (ybottom - ytop)), adjustable="box")
 
     if hue != "_hue":
         # set legend markers under `hue` to o
@@ -188,6 +194,9 @@ def plot_dm(
                 ell.set_edgecolor("grey")
                 ax.add_artist(ell)
 
+    if title is not None:
+        fig.suptitle(title, fontsize=title_fs)
+    fig.subplots_adjust(top=0.85)
     fig.tight_layout()
     fig.savefig(fig_path, dpi=300, bbox_inches="tight")
     # also save a pdf file
@@ -273,7 +282,6 @@ if __name__ == "__main__":
         help="Column name in the metadata table to style samples",
         default=None,
     )
-
     parser.add_argument(
         "-e",
         "--ellipses",
@@ -304,12 +312,20 @@ if __name__ == "__main__":
         sample_weight_key=sample_weight_key,
         spikein_taxa_key=spikein_taxa_key,
     )
+
+    # [PCA|PCoA (with Bray-Curtis distance)] on[log10 | ]<[tax_level> [relative abundance|absolute abundance|raw count]
+    # use keyword format
+    title_template = "{distance} on {log10}{tax_level} {transform}"
+    title_kw = {}
     if transform == "relative":
         df_otu = df_otu_count.div(df_otu_count.sum(axis=1), axis=0)
+        title_kw["transform"] = "relative abundance"
     elif transform == "absolute":
         df_otu = df_otu_count.div(df_meta.norm_factor, axis=0)
+        title_kw["transform"] = "absolute abundance"
     elif transform == "count":
         df_otu = df_otu_count.copy()
+        title_kw["transform"] = "raw count"
     else:
         raise ValueError(f"Unsupported transform: {transform}")
 
@@ -317,7 +333,19 @@ if __name__ == "__main__":
         df_otu = _agg_along_axis(df_otu, df_meta[rep_group_key], axis=0)
         df_meta = df_meta.groupby(rep_group_key).first()
     if log10:
+        title_kw["log10"] = "log10 "
         df_otu = np.log10(df_otu + 1e-8)
+    else:
+        title_kw["log10"] = ""
+
+    if distance == "braycurtis":
+        title_kw["distance"] = "PCoA (Bray-Curtis)"
+    elif distance == "euclid":
+        title_kw["distance"] = "PCA"
+    else:
+        raise ValueError(
+            f"Unsupported distance metric: {distance}, select from 'braycurtis' or 'euclid'."
+        )
 
     os.makedirs(fig_dir, exist_ok=True)
     for level in tax_levels:
@@ -326,11 +354,16 @@ if __name__ == "__main__":
             fig_dir,
             f"{distance}_{'log10_' if log10 else ''}{transform}_{'g' if rep_group_key is not None else 's'}_{level}.png",
         )
+        if level == "otu":
+            level = "ZOTU"
+        else:
+            level = level.capitalize()
         plot_dm(
             df_otu_tax,
             df_meta,
             fig_path,
             distance=distance,
+            title=title_template.format(**title_kw, tax_level=level),
             hue=hue,
             style=style,
             plot_ellipses=ellipses,
