@@ -4,49 +4,58 @@ import gzip
 import os
 import re
 import warnings
+from typing import IO
 
 import pandas as pd
 from tqdm.auto import tqdm
 
 
-def pattern_illumina(file_: str) -> tuple[str, str]:
-    """Pattern function for Illumina default output."""
-    file_pattern = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q.gz$")
-    match = file_pattern.search(os.path.basename(file_))
-    if match:
-        sample_name, read_type = match.groups()[:2]
-        return sample_name, read_type
-    return None
+PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q.gz$")
+# - sample_R1.fq.gz or sample_R2.fq.gz (or fastq.gz)
+# - sample_1.fq.gz or sample_2.fq.gz (or fastq.gz)
+# - sample.R1.fq.gz or sample.R2.fq.gz (or fastq.gz)
+# - sample.1.fq.gz or sample.2.fq.gz (or fastq.gz)
+PATTERN_CUSTOM = re.compile(r"^(.+?)(?:_|\.)((?:R)?[12]).f(ast)?q(.gz)?$")
 
 
-def pattern_custom(file_: str) -> tuple[str, str]:
-    """Pattern function for custom pattern ending with fq.gz or fastq.gz."""
-    file_pattern = re.compile(r"^(.+?)_(R[12]).f(ast)?q.gz$")
-    match = file_pattern.search(os.path.basename(file_))
-    if match:
-        sample_name, read_type = match.groups()[:2]
-        return sample_name, read_type
-    return None
+def smart_open(file_path: str, mode: str = None) -> IO[str] | gzip.GzipFile:
+    """Open a file as text or as a gzip file based on its magic number.
+
+    Args:
+        file_path (str): Path to the file to be opened.
+        mode (str): Mode in which the file should be opened. Defaults to 'rt' (read text).
+
+    Returns:
+        Union[IO[str], gzip.GzipFile]: A file object or a gzip file object.
+    """
+    with open(file_path, "rb") as f:
+        first_two_bytes = f.read(2)
+
+    if first_two_bytes == b"\x1f\x8b":  # Magic number for gzip files
+        return gzip.open(file_path, "rt" if mode is None else mode)
+    else:
+        return open(file_path, "r" if mode is None else mode)
 
 
 def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
-    pattern_functions = [pattern_illumina, pattern_custom]
-
     # Dictionary to store file pairs
     file_pairs = {}
 
     # Find all .fastq.gz and .fq.gz files in the directory
-    fastq_files = glob.glob(os.path.join(directory, "*.fastq.gz")) + glob.glob(
-        os.path.join(directory, "*.fq.gz")
+    fastq_files = (
+        glob.glob(os.path.join(directory, "*.fastq.gz"))
+        + glob.glob(os.path.join(directory, "*.fq.gz"))
+        + glob.glob(os.path.join(directory, "*.fastq"))
+        + glob.glob(os.path.join(directory, "*.fq"))
     )
 
     # Process each file using pattern functions
     for file_ in fastq_files:
-        matched = False
-        for pattern_function in pattern_functions:
-            match = pattern_function(file_)
+        for pattern in [PATTERN_ILLUMINA, PATTERN_CUSTOM]:
+            match = pattern.search(os.path.basename(file_))
             if match:
-                sample_name, read_type = match
+                sample_name, read_type = match.groups()[:2]
+                read_type = {"1": "R1", "2": "R2"}.get(read_type, read_type)
                 if read_type not in ["R1", "R2"]:
                     warnings.warn(f"Invalid read type for file: {file_}")
                     continue
@@ -58,10 +67,8 @@ def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
                     warnings.warn(f"Duplicate file for {pair_key}: {file_}")
                 else:
                     file_pairs[pair_key] = file_
-                matched = True
                 break
-
-        if not matched:
+        else:
             warnings.warn(f"File {file_} does not match any known pattern.")
 
     # Match R1 and R2 pairs and prepare the output
@@ -98,6 +105,7 @@ def cat_fastq(
     output_fp_r2=None,
     metadata: str = None,
     _remove_undet: bool = True,
+    _have_sample_name: bool = False,
 ):
     """Process FASTQ files in the given directory, renaming reads,and write the output
     to the specified file pointers. Output fastq will be interleaved if `output_fp_r2`
@@ -117,12 +125,7 @@ def cat_fastq(
     if metadata is not None:
         samples_in_meta = pd.read_table(metadata, index_col=0).index.to_list()
     else:
-
-        class _all_in:
-            def __contains__(self, item):
-                return True
-
-        samples_in_meta = _all_in()
+        samples_in_meta = None
 
     if (
         (
@@ -154,12 +157,17 @@ def cat_fastq(
     else:
         raise ValueError("Output file pointers must be both gzip or both text file.")
 
+    if _have_sample_name:
+        rename_read = _rename_read_concat
+    else:
+        rename_read = _rename_read_illumina
+
     for r1_path, r2_path, sample_name in tqdm(matched_pairs):
-        if not sample_name in samples_in_meta:
+        if samples_in_meta is not None and sample_name not in samples_in_meta:
             continue
         if _remove_undet and sample_name == "Undetermined":
             continue
-        with gzip.open(r1_path, "rt") as r1_file, gzip.open(r2_path, "rt") as r2_file:
+        with smart_open(r1_path) as r1_file, smart_open(r2_path) as r2_file:
             paired_read_iter = zip(
                 zip(*[r1_file] * 4, strict=True),
                 zip(*[r2_file] * 4, strict=True),
@@ -178,7 +186,7 @@ def cat_fastq(
                 )
 
 
-def rename_read(
+def _rename_read_illumina(
     header_line: str, sample_name: str, read_number: int, read_index: int
 ) -> str:
     """
@@ -195,5 +203,14 @@ def rename_read(
     """
     # Remove '@' and split by space, take first part
     original_header = header_line.strip().split()[0][1:]
-    new_header = f"@sample={sample_name} {original_header} {read_number} {read_index}\n"
-    return new_header
+    return f"@sample={sample_name} {read_number} {read_index} {original_header}\n"
+
+
+def _rename_read_concat(
+    header_line: str, sample_name: str, read_number: int, read_index: int
+) -> str:
+    header_line = header_line[1:]
+    original_header, comment = header_line.split(maxsplit=1)
+    original_sample = original_header.split("=", 1)[1]
+    new_sample = f"{original_sample}_{sample_name}"
+    return f"@sample={new_sample} {comment}"

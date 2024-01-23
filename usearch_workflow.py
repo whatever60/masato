@@ -501,7 +501,7 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
     # to replace `--otutab`, but the other commands are not implemented.
     # Besides, in usearch chimera is removed as part of the clustering step, but
     # in vsearch chimera removal is a separate step.
-    subprocess.run(
+    unoise3_proc = subprocess.Popen(
         [
             "vsearch",
             "--cluster_unoise",
@@ -514,8 +514,9 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
             # "--strand",
             # "both",
         ],
+        stdout=subprocess.PIPE,
     )
-    subprocess.run(
+    uchime3_proc = subprocess.Popen(
         [
             "vsearch",
             "--uchime3_denovo",
@@ -525,7 +526,9 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
             "--relabel",
             "ZOTU",
         ],
+        stdin=unoise3_proc.stdout,
     )
+    uchime3_proc.wait()
     # os.remove(zotu_init)
 
 
