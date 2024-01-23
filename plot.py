@@ -84,6 +84,8 @@ def _heatmap(
     cbar_label: str,
     axs: list[list[plt.Axes]],
     cmap: str,
+    vmax: float | None = None,
+    vmin: float | None = None,
 ) -> None:
     for i, (ax_dend, ax, df, name) in enumerate(zip(axs[0], axs[1], dfs, names)):
         # df = df.copy()
@@ -126,6 +128,8 @@ def _heatmap(
             cbar=cbar,
             cbar_ax=cbar_ax,
             cbar_kws=cbar_kws,
+            vmax=vmax,
+            vmin=vmin,
             # square=True,
         )
         ax.set_xlabel("")
@@ -500,17 +504,27 @@ if __name__ == "__main__":
                         fig, axs = _get_subplots(
                             num_cols, size, ratio, height_ratios=None
                         )
-                    pesudo_abundance = 1e-4
+                    # pesudo_abundance = 1e-4
+                    vmax, vmin = 1, 1e-4
+
+                    def _get_log10(arr: pd.DataFrame) -> pd.DataFrame:
+                        # take log10, change -inf to log10(vmin), take transpose
+                        arr = arr.copy()
+                        arr[arr == 0] = vmin
+                        return np.log10(arr)
+
                     _heatmap(
                         [
-                            np.log10(res_group + pesudo_abundance).T
+                            _get_log10(res_group.transpose())
                             for res_group in res_group_list
                         ],
                         names,
                         title=f"Taxonomy at {level} level",
-                        cbar_label=f"log10(relative abundance + {pesudo_abundance:.0e})",
+                        cbar_label=f"log10(relative abundance) (range: [{vmin:.0e}, {vmax}])",
                         axs=axs,
                         cmap="rocket_r",
+                        vmax=np.log10(vmax),
+                        vmin=np.log10(vmin),
                     )
                     fig.savefig(
                         f"{fig_dir}/rel_ab_group_{level}_hml.png",
