@@ -538,7 +538,7 @@ if __name__ == "__main__":
                         bbox_inches="tight",
                         dpi=300,
                     )
-                if plot_type in ["heatmap", "all"]:
+                if plot_type in ["heatmap"]:
                     if sample_hierarchical_clustering:
                         fig, axs = _get_subplots(num_cols, size, ratio)
                     else:
