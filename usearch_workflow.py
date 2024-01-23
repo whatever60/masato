@@ -545,6 +545,10 @@ def _fq2fa(input_fastq: str, output_fasta: str) -> None:
 
 
 def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: int):
+    if not os.path.isfile(zotu_fasta):
+        raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
+    if not os.path.isfile(input_fastq):
+        raise ValueError(f"Query fastq file {input_fastq} does not exist")
     output_dir = os.path.dirname(input_fastq)
     # intermediate_fasta = os.path.join(output_dir, "_temp.fa.gz")
     # _fq2fa(input_fastq, intermediate_fasta)

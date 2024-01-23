@@ -11,10 +11,10 @@ from tqdm.auto import tqdm
 
 
 PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q.gz$")
-# - sample_R1.fq.gz or sample_R2.fq.gz (or fastq.gz)
-# - sample_1.fq.gz or sample_2.fq.gz (or fastq.gz)
-# - sample.R1.fq.gz or sample.R2.fq.gz (or fastq.gz)
-# - sample.1.fq.gz or sample.2.fq.gz (or fastq.gz)
+# - sample_R1.fq.gz or sample_R2.fq.gz (or fastq.gz, same for the following)
+# - sample_1.fq.gz or sample_2.fq.gz
+# - sample.R1.fq.gz or sample.R2.fq.gz
+# - sample.1.fq.gz or sample.2.fq.gz
 PATTERN_CUSTOM = re.compile(r"^(.+?)(?:_|\.)((?:R)?[12]).f(ast)?q(.gz)?$")
 
 

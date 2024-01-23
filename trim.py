@@ -536,7 +536,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.mode == "simple":
-        simple_preprocess(args.input_dir, args.output_fastq)
+        simple_preprocess(args.input_dir, args.output)
     elif args.mode == "isolate_150":
         isolate_150_preprocess(
             args.input_dir,

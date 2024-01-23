@@ -100,8 +100,8 @@ def _calc_norm_factor(
                 "norm_factor": norm_factor,
             }
         )
-
-    df_meta = df_meta.join(df_meta.apply(compute_spikein_and_norm, axis=1))
+    df_meta_add = df_meta.apply(compute_spikein_and_norm, axis=1)
+    df_meta = df_meta.join(df_meta_add)
     return df_meta
 
 
@@ -217,12 +217,18 @@ def _taxa_qc(
 def read_tables(
     otu_count_table: str, metadata_path: str, otu_taxonomy_path: str
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
     df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
     df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
-    df_tax.loc["unknown"] = "unknown"
-    df_tax.loc["unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
-    df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
-    df_otu_count.rename({"ZOTU_UNKNOWN": "unknown"}, axis=0, inplace=True)
+    
+    # Indices of df_meta, df_tax, and df_otu_count must all be unique.
+    if not df_meta.index.is_unique:
+        raise ValueError("Sample names in metadata must be unique.")
+    if not df_tax.index.is_unique:
+        raise ValueError("OTU numbers in taxonomy table must be unique.")
+    if not df_otu_count.columns.is_unique:
+        raise ValueError("Sample names in OTU count table must be unique.")
+
     # add missing samples with all zero counts
     missing_samples = list(set(df_meta.index) - set(df_otu_count.columns))
     if missing_samples:
@@ -239,11 +245,22 @@ def read_tables(
         )
     # only care about samples in metadata
     df_otu_count = df_otu_count[df_meta.index].T
+
     # only care about OTUs with taxonomy
-    common_otus = list(set(df_otu_count.columns).intersection(df_tax.index))
+    otu_in_tax = set(df_tax.index)
+    otu_in_count = set(df_otu_count.columns)
+    common_otus = list(otu_in_tax & otu_in_count)
+    no_tax_otus = list(otu_in_count - otu_in_tax)
     df_tax = df_tax.loc[common_otus]
-    df_otu_count = df_otu_count.loc[:, common_otus]
+    df_otu_count_w_tax = df_otu_count.loc[:, common_otus].copy()
+    df_otu_count_wo_tax = df_otu_count.loc[:, no_tax_otus]
+    df_otu_count_w_tax.loc[:, "unknown"] = df_otu_count_wo_tax.sum(axis=1)
+    df_otu_count = df_otu_count_w_tax
+    # add a dummy row for unknown OTUs and a dummy column for OTU
+    df_tax.loc["unknown"] = "unknown"
+    df_tax.loc["unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
     df_tax["otu"] = df_tax.index
+    df_tax["otu_p"] = 1
     return df_otu_count, df_meta, df_tax
 
 

@@ -133,6 +133,7 @@ def _heatmap(
             # square=True,
         )
         ax.set_xlabel("")
+        ax.tick_params(axis="x", labelrotation=90)
 
         if ax_dend is not None:
             # plot dendrogram
@@ -450,6 +451,8 @@ if __name__ == "__main__":
         if len(rel_ab_thresholds) == 1:
             rel_ab_thresholds = rel_ab_thresholds * len(tax_levels)
 
+        # an empirical way to determine width for pretty figure
+        width = df_otu_rel_ab_g.shape[0] / 4 + 1.5
         for level, rel_ab_thres in zip(tax_levels, rel_ab_thresholds):
             # aggregate at taxonomic level
             res = _taxa_qc(
@@ -463,7 +466,6 @@ if __name__ == "__main__":
                 res.loc[group[rep_group_key].unique()] for group in groups
             ]
             num_cols = len(res_group_list)
-            width = 6
             # wspace, hspace = 0.1, 0.01
 
             if plot_type in ["stacked_bar", "all"]:
