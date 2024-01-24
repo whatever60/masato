@@ -117,6 +117,7 @@ def plot_dm(
     if hue is None:
         pc["_hue"] = "all"
         hue = "_hue"
+    hue_order = sorted(pc[hue].unique().tolist())
     if style is None:
         style_order = None
     else:
@@ -124,13 +125,16 @@ def plot_dm(
 
     axis_label_fs = 14
     title_fs = 16
-    fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+    fig, axs = plt.subplots(1, 2, figsize=(8, 3.5))
     sns.scatterplot(
         data=pc,
         x="PC1",
         y="PC2",
         hue=hue,
+        hue_order=hue_order,
         style=style,
+        # markers=markers,
+        style_order=style_order,
         linewidth=0,
         legend=False,
         ax=axs[0],
@@ -143,6 +147,7 @@ def plot_dm(
         x="PC2",
         y="PC3",
         hue=hue,
+        hue_order=hue_order,
         style=style,
         # markers=markers,
         style_order=style_order,
@@ -196,7 +201,7 @@ def plot_dm(
 
     if title is not None:
         fig.suptitle(title, fontsize=title_fs)
-    fig.subplots_adjust(top=0.85)
+    fig.subplots_adjust(top=0.6)
     fig.tight_layout()
     fig.savefig(fig_path, dpi=300, bbox_inches="tight")
     # also save a pdf file

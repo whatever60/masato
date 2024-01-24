@@ -312,12 +312,14 @@ def isolate_150_preprocess(
     rename_files_with_mmv(output_dir_demux, rename_pattern)
 
     # move all remaining files (whose name1 or name2 is "unknown") to output_dir/demux_failed
-    demux_failed_files = list(set(
-        glob.glob(os.path.join(output_dir_demux, "*-unknown_R1.fq.gz"))
-        + glob.glob(os.path.join(output_dir_demux, "*-unknown_R2.fq.gz"))
-        + glob.glob(os.path.join(output_dir_demux, "unknown-*_R1.fq.gz"))
-        + glob.glob(os.path.join(output_dir_demux, "unknown-*_R2.fq.gz"))
-    ))
+    demux_failed_files = list(
+        set(
+            glob.glob(os.path.join(output_dir_demux, "*-unknown_R1.fq.gz"))
+            + glob.glob(os.path.join(output_dir_demux, "*-unknown_R2.fq.gz"))
+            + glob.glob(os.path.join(output_dir_demux, "unknown-*_R1.fq.gz"))
+            + glob.glob(os.path.join(output_dir_demux, "unknown-*_R2.fq.gz"))
+        )
+    )
     subprocess.run(
         [
             "mv",

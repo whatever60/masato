@@ -163,6 +163,8 @@ def _barplot_with_whisker_strip(
     axs: list[plt.Axes],
     ylog: bool = False,
 ) -> None:
+    axis_tick_fs = 12
+    values = []
     for i, (ax, df, name) in enumerate(zip(axs, dfs, names)):
         df = df.copy()
         # index = []
@@ -197,10 +199,12 @@ def _barplot_with_whisker_strip(
         colors = "gray"
 
         # Plot bars with error bars for groups with multiple samples
+        value = group[column_of_interest].mean()
+        values.extend(value)
         if len(groups_with_multiple_samples):
             ax.bar(
                 range(len(group)),
-                group[column_of_interest].mean(),
+                value,
                 yerr=group[column_of_interest].std()
                 * [
                     1 if group in groups_with_multiple_samples else 0
@@ -211,6 +215,7 @@ def _barplot_with_whisker_strip(
                 width=0.6,
                 # fill=False,
                 color=colors,
+                log=ylog,
             )
 
             # Remove edgecolor from bars to get rid of the faint gray line
@@ -232,24 +237,29 @@ def _barplot_with_whisker_strip(
         else:
             ax.bar(
                 range(len(group)),
-                group[column_of_interest].mean(),
-                width=0.5,
+                value,
+                width=0.6,
                 # fill=False,
                 color=colors,
+                log=ylog,
             )
         ax.xaxis.set_major_locator(FixedLocator(range(len(group.groups.keys()))))
-        ax.set_xticklabels(labels=group.groups.keys())
-        ax.tick_params(axis="x", labelsize=8)
-
-        ax.set_xlabel("")
-        if i == 0:
-            ax.set_ylabel(title, fontsize=14)
-        else:
-            ax.set_ylabel("")
-        if ylog:
-            ax.set_yscale("log")
+        ax.set_xticklabels(
+            labels=group.groups.keys(), rotation=90, fontsize=axis_tick_fs
+        )
+        ax.tick_params(axis="y", labelsize=axis_tick_fs)
+        # leave some space on the left and right
+        ax.set_xlim(-0.5, len(group.groups.keys()) - 0.5)
         ax.set_title(name)
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
+
+    axs[0].set_ylabel(title, fontsize=14)
+    if ylog:
+        # set range to lower than the minimum value and higher than the maximum value
+        ax.set_ylim(
+            10 ** (np.floor(np.log10(min(values)))),
+            10 ** (np.ceil(np.log10(max(values)))),
+        )
+
 
 
 def _calc_alpha_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -410,7 +420,7 @@ if __name__ == "__main__":
     )
     parser_stats.add_argument("-rk", "--rarefying_key", type=str, default=None)
     parser_stats.add_argument("-rv", "--rarefying_value", type=int, default=None)
-    parser_stats.add_argument("-rn", "--rarefying_repeat", type=int, default=10)
+    parser_stats.add_argument("-rn", "--rarefying_repeat", type=int, default=0)
     parser_stats.add_argument("-p", "--plot_strip", action="store_true", default=False)
 
     args = parser.parse_args()
@@ -567,21 +577,30 @@ if __name__ == "__main__":
         plot_strip = args.plot_strip
         rarefying_key = args.rarefying_key
         rarefying_value = args.rarefying_value
+        rarefying_repeat = args.rarefying_repeat
 
-        if rarefying_key is not None:
+        width = df_meta.groupby([sample_group_key, rep_group_key]).ngroups / 3 + 1.5
+
+        if rarefying_repeat > 1:
             # Rarefying takes place by the following order:
             # - When rarefying_key is specified:
             #    - When this key is a string, rarefy to the depth of the sample corresponding to the key.
             #    - When this key is a int, rarefy to this value.
-            #    - When this key is None, rarefy to `rarefying_value`.
-            # - When rarefying_key is None:
-            #    - When rarefying_value is specified, rarefy to this value.
-            #    - When rarefying_value is None, rarefy to the minimum depth of all samples - 1.
+            #    - When this key is None, rarefy to `rarefying_value` if it is
+            #        specified, otherwise rarefy to the minimum depth of all samples.
+            # - When rarefying_key isn't specified, treat as if rarefying_key is None
+            #     for all samples.
             depth = df_otu_count.sum(axis=1)
             if rarefying_value is None:
-                rarefying_value = int(depth.min() - 1)
+                rarefying_value = int(depth.min()) - 1
+
             ref = []
-            for i in df_meta[rarefying_key].tolist():
+            if rarefying_key is None:
+                rarefying_keys = [np.nan] * len(df_otu_count)
+            else:
+                rarefying_keys = df_meta[rarefying_key].tolist()
+
+            for i in rarefying_keys:
                 if isinstance(i, str):
                     if not i in df_otu_count.index:
                         raise ValueError(f"Reference sample {i} is not available.")
@@ -594,10 +613,11 @@ if __name__ == "__main__":
                     raise ValueError(
                         f"Unknown data type for rarefying_key: {i} ({type(i)})"
                     )
+
             # rarefy
-            df_otu_count, names_orig = _rarefying(
-                df_otu_count, ref, args.rarefying_repeat
-            )
+            df_otu_count_orig = df_otu_count.copy()
+            df_meta_orig = df_meta.copy()
+            df_otu_count, names_orig = _rarefying(df_otu_count, ref, rarefying_repeat)
             # NOTE:
             # Must create the dummy dataframe as a column, cannot be empty dataframe
             # with index, otherwise order of merged dataframe index will be slightly
@@ -610,7 +630,11 @@ if __name__ == "__main__":
                 validate="many_to_one",
             ).reset_index(names=df_meta.index.name)
             df_meta.index = df_otu_count.index
+        else:
+            df_otu_count_orig = None
+            df_meta_orig = None
 
+        wspace = 0.15
         for level in tax_levels:
             # no need for taxa qc, all taxa count
             res = _agg_along_axis(df_otu_count, df_tax[level], axis=1)
@@ -621,18 +645,12 @@ if __name__ == "__main__":
                 right_index=True,
             )
             _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
-            title_prefix = f"{level.upper() if level == 'otu' else level.capitalize()}"
-            for column_of_interest, title, logy in zip(
-                ["shannon", "simpson", "richness", "chao1", "sequencing_depth"],
-                [
-                    f"{title_prefix} Shannon entropy",
-                    f"{title_prefix} Simpson's index",
-                    f"{title_prefix} Richness",
-                    f"{title_prefix} Chao1 index",
-                    "Library size",
-                ],
-                [False, False, False, False, True],
+            title_prefix = f"{'ZOTU' if level == 'otu' else level.capitalize()}"
+            for column_of_interest, title in zip(
+                ["shannon", "simpson", "richness", "chao1"],
+                ["Shannon entropy", "Simpson's index", "Richness", "Chao1 index"],
             ):
+                title = f"{title_prefix} {title}"
                 fig, axs = plt.subplots(
                     1, len(groups), sharey="row", width_ratios=ratio, figsize=(12, 3)
                 )
@@ -644,18 +662,50 @@ if __name__ == "__main__":
                     column_of_interest=column_of_interest,
                     plot_strip=plot_strip,
                     axs=axs,
-                    ylog=logy,
+                    ylog=False,
                 )
-                fig.subplots_adjust(wspace=0.05)
-                fig.savefig(
-                    f"{fig_dir}/{column_of_interest}_{level}.png",
-                    bbox_inches="tight",
-                    dpi=300,
-                )
-                fig.savefig(
-                    f"{fig_dir}/{column_of_interest}_{level}.pdf",
-                    bbox_inches="tight",
-                    dpi=300,
-                )
+                fig.subplots_adjust(wspace=wspace)
+                for format_ in ["png", "pdf"]:
+                    fig.savefig(
+                        f"{fig_dir}/{column_of_interest}_{level}.{format_}",
+                        bbox_inches="tight",
+                        dpi=300,
+                    )
+                # close figure to save memory
+                plt.close(fig)
+
+        # plot sequencing depth separately
+        if df_otu_count_orig is not None:
+            df_otu_count = df_otu_count_orig
+            df_meta = df_meta_orig
+        res = df_otu_count  # no need to aggregate
+        meta_l = pd.merge(
+            df_meta,
+            _calc_alpha_metrics(res),
+            left_index=True,
+            right_index=True,
+        )
+        _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
+        fig, axs = plt.subplots(
+            1, len(groups), sharey="row", width_ratios=ratio, figsize=(12, 3)
+        )
+        fig.subplots_adjust(wspace=wspace)
+        _barplot_with_whisker_strip(
+            groups,
+            names=names,
+            title="Sequencing depth",
+            group_key=rep_group_key,
+            column_of_interest="sequencing_depth",
+            plot_strip=plot_strip,
+            axs=axs,
+            ylog=True,
+        )
+        for format_ in ["png", "pdf"]:
+            fig.savefig(
+                f"{fig_dir}/sequencing_depth.{format_}",
+                bbox_inches="tight",
+                dpi=300,
+            )
+        plt.close(fig)
     else:
         raise ValueError("Unknown command.")
