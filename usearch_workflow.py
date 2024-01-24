@@ -116,10 +116,19 @@ def merge_pairs(
         shutil.rmtree(f"{output_dir}/temp")
 
 
-def qc(input_fastq: str, num_threads: int = 16, backend="vsearch") -> str:
-    output_dir = os.path.dirname(input_fastq)
-    filename = os.path.basename(input_fastq).split(".")[0]
-    output_fastx = os.path.join(output_dir, f"{filename}.filtered.fastq")
+def qc(
+    input_fastq: str, output_fasta: str = None, num_threads: int = 16, backend="vsearch"
+) -> str:
+    """Output fasta is default to be modified from input fastq, but can be specified.
+    For example, if input fastq file is /data/merged.fq.gz, then output fasta will be
+    /data/merged.filtered.fq.gz, unless otherwise specified.
+    """
+    if output_fasta is None:
+        output_dir = os.path.dirname(input_fastq)
+        filename = os.path.basename(input_fastq).split(".")[0]
+        output_fastx = os.path.join(output_dir, f"{filename}.filtered.fq")
+    else:
+        output_fastx = output_fasta.rstrip(".gz")
 
     if backend == "usearch":
         num_splits = None
@@ -357,9 +366,19 @@ def subsample(
     pd.DataFrame(subsample_metadata).to_csv(output_metadata_path, sep="\t", index=False)
 
 
-def db_construct(input_fastx, num_threads: int, backend: str = "vsearch"):
-    output_dir, base_name = os.path.split(input_fastx)
-    base_name_noext = base_name.split(".")[0]
+def db_construct(
+    input_fastx: str, output_fasta: str, num_threads: int, backend: str = "vsearch"
+) -> str:
+    """Output fasta is default to be modified from input fastq, but can be specified.
+    For example, if input fastq file is /data/merged.filtered.fq.gz, then output fasta
+    will be /data/merged.uniq.fa.gz, unless otherwise specified.
+    """
+    if output_fasta is None:
+        output_dir, base_name = os.path.split(input_fastx)
+        base_name_noext = base_name.split(".")[0]
+        output_path = f"{output_dir}/{base_name_noext}.uniq.fa"
+    else:
+        output_path = output_fasta.rstrip(".gz")
 
     if backend == "usearch":
         subprocess.run(
@@ -408,11 +427,13 @@ def db_construct(input_fastx, num_threads: int, backend: str = "vsearch"):
                 "--fastx_uniques",
                 input_fastx,
                 "--fastaout",
-                f"{output_dir}/{base_name_noext}.uniq.fa",
+                output_path,
                 "--sizeout",
             ]
         )
-        subprocess.run(["pigz", "-f", f"{output_dir}/{base_name_noext}.uniq.fa"])
+        subprocess.run(["pigz", "-f", output_path])
+        output_path += ".gz"
+        return output_path
 
 
 def cluster_uparse(
@@ -544,12 +565,21 @@ def _fq2fa(input_fastq: str, output_fasta: str) -> None:
         raise RuntimeError(f"Error executing command: {e.stderr}")
 
 
-def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: int):
+def search_global(
+    input_fastq: str, zotu_fasta: str, output_tsv: str, id_: float, num_threads: int
+):
     if not os.path.isfile(zotu_fasta):
         raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
     if not os.path.isfile(input_fastq):
         raise ValueError(f"Query fastq file {input_fastq} does not exist")
-    output_dir = os.path.dirname(input_fastq)
+    if output_tsv is None:
+        output_dir = os.path.dirname(input_fastq)
+    else:
+        output_dir = os.path.dirname(output_tsv)
+        os.makedirs(output_dir, exist_ok=True)
+    output_tsv = os.path.join(output_dir, "unoise3_zotu.tsv")
+    output_not_matched = os.path.join(output_dir, "notmatched.fa")
+
     # intermediate_fasta = os.path.join(output_dir, "_temp.fa.gz")
     # _fq2fa(input_fastq, intermediate_fasta)
 
@@ -569,25 +599,20 @@ def search_global(input_fastq: str, zotu_fasta: str, id_: float, num_threads: in
             "--maxhits",
             "1",
             "--otutabout",
-            f"{output_dir}/unoise3_zotu.tsv",
+            output_tsv,
             "--notmatched",
-            f"{output_dir}/unoise3_zotu_notmatched.fa",
+            output_not_matched,
             # "--sizeout",
             "--threads",
             str(num_threads),
         ],
     )
-    subprocess.run(["pigz", "-f", f"{output_dir}/unoise3_zotu_notmatched.fa"])
-
-    # os.remove(intermediate_fasta)
-
     # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
     # matched to anything in database
     zotu_table = pd.read_table(f"{output_dir}/unoise3_zotu.tsv", index_col=0)
     counter = {i: 0 for i in zotu_table.columns}
-    with gzip.open(f"{output_dir}/unoise3_zotu_notmatched.fa.gz", "rt") as f:
-        for record in SeqIO.parse(f, "fasta"):
-            counter[record.id.split("=")[1]] += 1
+    for record in SeqIO.parse(output_not_matched, "fasta"):
+        counter[record.id.split("=")[1]] += 1
     zotu_table.loc["ZOTU_UNKNOWN"] = pd.Series(counter)
     zotu_table.to_csv(f"{output_dir}/unoise3_zotu.tsv", sep="\t")
 
@@ -868,6 +893,13 @@ def main():
         "-i", "--input_fastq", help="Input FASTA file to construct the database from"
     )
     db_construct_parser.add_argument(
+        "-o",
+        "--output_fasta",
+        help="Output path for database FASTA file",
+        type=str,
+        default=None,
+    )
+    db_construct_parser.add_argument(
         "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
     )
 
@@ -913,6 +945,13 @@ def main():
         "-d", "--zotu_fasta", help="Input FASTA file to search against", type=str
     )
     search_global_parser.add_argument(
+        "-o",
+        "--output_tsv",
+        help="Output path for ZOTU tsv file",
+        type=str,
+        default=None,
+    )
+    search_global_parser.add_argument(
         "--id", type=float, default=0.9, help="Minimum cluster identity"
     )
     search_global_parser.add_argument(
@@ -954,8 +993,8 @@ def main():
     args = parser.parse_args()
 
     if args.subcommand == "db_construct":
-        fastx_post_qc = qc(args.input_fastq, args.num_threads)
-        db_construct(fastx_post_qc, args.num_threads)
+        fastx_post_qc = qc(args.input_fastq, None, args.num_threads)
+        db_construct(fastx_post_qc, args.output_fasta, args.num_threads)
     elif args.subcommand == "cluster_uparse":
         cluster_uparse(
             args.input_fastq, args.db_fasta, args.output_dir, args.num_threads
@@ -963,7 +1002,13 @@ def main():
     elif args.subcommand == "cluster_unoise3":
         cluster_unoise3(args.uniq_fasta, args.minsize, args.out_fasta)
     elif args.subcommand == "search_global":
-        search_global(args.input_fastq, args.zotu_fasta, args.id, args.num_threads)
+        search_global(
+            args.input_fastq,
+            args.zotu_fasta,
+            args.output_tsv,
+            args.id,
+            args.num_threads,
+        )
     elif args.subcommand == "tax_nbc":
         tax_nbc(args.input_fasta, args.db_fasta, args.output_path, args.num_threads)
     elif args.subcommand == "tax_sintax":
