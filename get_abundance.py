@@ -191,10 +191,11 @@ def _taxa_qc(
         When rel_ab_thres is an int, if the rank of its relative abundance is above
             the threshold in all samples.
     """
-    if int(rel_ab_thres) == rel_ab_thres:
+    if rel_ab_thres and int(rel_ab_thres) == rel_ab_thres:
         rare_taxa = df_tax_rel_ab.columns[
             (
-                df_tax_rel_ab.rank(axis=1, ascending=False, method="min") > rel_ab_thres
+                df_tax_rel_ab.rank(axis=1, ascending=False, method="min")
+                > rel_ab_thres
             ).all(axis=0)
         ].tolist()
     else:
@@ -203,11 +204,11 @@ def _taxa_qc(
         ].tolist()
     if "unknown" in rare_taxa:
         rare_taxa.remove("unknown")
-    if keep_rare:
+    df_tax_rel_ab = df_tax_rel_ab.drop(rare_taxa, axis=1)
+    if rare_taxa and keep_rare:
         df_tax_rel_ab_rare = (
             df_tax_rel_ab[rare_taxa].sum(axis=1).to_frame(name="others")
         )
-        df_tax_rel_ab = df_tax_rel_ab.drop(rare_taxa, axis=1)
         df_tax_rel_ab = pd.concat([df_tax_rel_ab, df_tax_rel_ab_rare], axis=1)
     if not keep_unknown:
         df_tax_rel_ab = df_tax_rel_ab.drop("unknown", axis=1)
@@ -216,11 +217,16 @@ def _taxa_qc(
 
 
 def read_tables(
-    otu_count_table: str, metadata_path: str, otu_taxonomy_path: str
+    otu_count_table: str,
+    metadata_path: str,
+    otu_taxonomy_path: str,
+    warning: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
     df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
-    df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
+    df_tax = pd.read_table(otu_taxonomy_path, index_col="otu").rename(
+        {"otu.1": "otu"}, axis=1
+    )
 
     # Indices of df_meta, df_tax, and df_otu_count must all be unique.
     if not df_meta.index.is_unique:
@@ -233,10 +239,11 @@ def read_tables(
     # add missing samples with all zero counts
     missing_samples = list(set(df_meta.index) - set(df_otu_count.columns))
     if missing_samples:
-        print("WARNING: The following samples are missing from OTU count table:")
-        print("\t", end="")
-        print(*sorted(missing_samples), sep="\n\t")
-        print("Filling in missing samples with all zero counts.")
+        if warning:
+            print("WARNING: The following samples are missing from OTU count table:")
+            print("\t", end="")
+            print(*sorted(missing_samples), sep="\n\t")
+            print("Filling in missing samples with all zero counts.")
         df_otu_count = pd.concat(
             [
                 df_otu_count,
@@ -260,8 +267,10 @@ def read_tables(
     # add a dummy row for unknown OTUs and a dummy column for OTU
     df_tax.loc["unknown"] = "unknown"
     df_tax.loc["unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
-    df_tax["otu"] = df_tax.index
-    df_tax["otu_p"] = 1
+    if "otu" not in df_tax.columns:
+        df_tax["otu"] = df_tax.index
+    if "otu_p" not in df_tax.columns:
+        df_tax["otu_p"] = 1
     return df_otu_count, df_meta, df_tax
 
 

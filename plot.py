@@ -81,9 +81,9 @@ def _heatmap(
     dfs: list[pd.DataFrame],
     names: list[str],
     title: str,
-    cbar_label: str,
     axs: list[list[plt.Axes]],
     cmap: str,
+    cbar_label: str = None,
     vmax: float | None = None,
     vmin: float | None = None,
 ) -> None:
@@ -101,7 +101,7 @@ def _heatmap(
         #         raise ValueError(f"Unknown column: {j}")
         # df.columns = columns
 
-        if i == len(axs[1]) - 1:
+        if cbar_label is not None and i == len(axs[1]) - 1:
             cbar = True
             cbar_ax = fig.add_axes(
                 [
@@ -181,9 +181,7 @@ def _barplot_with_whisker_strip(
 
         group = df.groupby(group_key, sort=False)
         # Determine which groups have more than one sample
-        groups_with_multiple_samples = group.filter(lambda x: len(x) > 1)[
-            group_key
-        ].unique()
+        groups_w_multi_samples = group.filter(lambda x: len(x) > 1)[group_key].unique()
 
         # assign different colors depending on if group.groups.keys() have "old", "reamplify", or "Scrape"
         # colors = []
@@ -201,13 +199,13 @@ def _barplot_with_whisker_strip(
         # Plot bars with error bars for groups with multiple samples
         value = group[column_of_interest].mean()
         values.extend(value)
-        if len(groups_with_multiple_samples):
+        if len(groups_w_multi_samples):
             ax.bar(
                 range(len(group)),
                 value,
                 yerr=group[column_of_interest].std()
                 * [
-                    1 if group in groups_with_multiple_samples else 0
+                    1 if group in groups_w_multi_samples else 0
                     for group in group.groups.keys()
                 ],
                 capsize=2,
@@ -224,7 +222,7 @@ def _barplot_with_whisker_strip(
 
             # Use stripplot for individual points for groups with multiple samples
             if plot_strip:
-                df_filtered = df[df[group_key].isin(groups_with_multiple_samples)]
+                df_filtered = df[df[group_key].isin(groups_w_multi_samples)]
                 sns.stripplot(
                     x=group_key,
                     y=column_of_interest,
@@ -261,7 +259,6 @@ def _barplot_with_whisker_strip(
         )
 
 
-
 def _calc_alpha_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate alpha diversity metrics for each sample.
     Note that you should ignore chao1 if your input data is not integer count.
@@ -296,6 +293,8 @@ def _get_subplots(
             figsize=fig_size,
             width_ratios=width_ratios,
         )
+        if num_cols == 1:
+            axs = [axs]
         axs = [[None] * num_cols, axs]
         fig.subplots_adjust(wspace=wspace)
     else:
@@ -308,6 +307,8 @@ def _get_subplots(
             width_ratios=width_ratios,
             height_ratios=height_ratios,
         )
+        if num_cols == 1:
+            axs = [[axs[0]], [axs[1]]]
         # share y for the heatmap, i.e., the second row
         for i in range(1, num_cols):
             axs[1, i].sharey(axs[1, 0])
@@ -375,7 +376,7 @@ if __name__ == "__main__":
     parser_ab.add_argument(
         "plot_type",
         type=str,
-        choices=["stacked_bar", "heatmap", "heatmap_log10", "all"],
+        choices=["stacked_bar", "heatmap", "heatmap_log10", "heatmap_binary", "all"],
     )
     parser_ab.add_argument("-i", "--otu_count_tsv", type=str, required=True)
     parser_ab.add_argument("-m", "--metadata", type=str, required=True)
@@ -392,7 +393,7 @@ if __name__ == "__main__":
         "--rel_ab_thresholds",
         nargs="+",
         type=float,
-        default=[0.01],
+        default=[0.0],
         help="Genus relative abundance threshold.",
     )
     parser_ab.add_argument(
@@ -504,7 +505,7 @@ if __name__ == "__main__":
                     bbox_inches="tight",
                     dpi=300,
                 )
-            if plot_type in ["heatmap", "heatmap_log10", "all"]:
+            if plot_type in ["heatmap", "heatmap_log10", "heatmap_binary", "all"]:
                 size = (
                     res.shape[0] // (res.shape[0] / width),
                     res.shape[1] // (res.shape[0] / width),
@@ -570,6 +571,34 @@ if __name__ == "__main__":
                     )
                     fig.savefig(
                         f"{fig_dir}/rel_ab_group_{level}_hm.pdf",
+                        bbox_inches="tight",
+                        dpi=300,
+                    )
+                if plot_type in ["heatmap_binary"]:
+                    size = size[0], size[1] / 2
+                    if sample_hierarchical_clustering:
+                        fig, axs = _get_subplots(num_cols, size, ratio)
+                    else:
+                        fig, axs = _get_subplots(
+                            num_cols, size, ratio, height_ratios=None
+                        )
+                    _heatmap(
+                        [
+                            (res_group > 0).astype(int).T
+                            for res_group in res_group_list
+                        ],
+                        names,
+                        title=f"Taxonomy at {level} level",
+                        axs=axs,
+                        cmap="BuPu",
+                    )
+                    fig.savefig(
+                        f"{fig_dir}/rel_ab_group_{level}_hmb.png",
+                        bbox_inches="tight",
+                        dpi=300,
+                    )
+                    fig.savefig(
+                        f"{fig_dir}/rel_ab_group_{level}_hmb.pdf",
                         bbox_inches="tight",
                         dpi=300,
                     )

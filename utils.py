@@ -18,25 +18,6 @@ PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q.gz$")
 PATTERN_CUSTOM = re.compile(r"^(.+?)(?:_|\.)((?:R)?[12]).f(ast)?q(.gz)?$")
 
 
-def smart_open(file_path: str, mode: str = None) -> IO[str] | gzip.GzipFile:
-    """Open a file as text or as a gzip file based on its magic number.
-
-    Args:
-        file_path (str): Path to the file to be opened.
-        mode (str): Mode in which the file should be opened. Defaults to 'rt' (read text).
-
-    Returns:
-        Union[IO[str], gzip.GzipFile]: A file object or a gzip file object.
-    """
-    with open(file_path, "rb") as f:
-        first_two_bytes = f.read(2)
-
-    if first_two_bytes == b"\x1f\x8b":  # Magic number for gzip files
-        return gzip.open(file_path, "rt" if mode is None else mode)
-    else:
-        return open(file_path, "r" if mode is None else mode)
-
-
 def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
     # Dictionary to store file pairs
     file_pairs = {}
@@ -97,6 +78,25 @@ def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
     # Order by sample name
     matched_pairs.sort(key=lambda x: x[2])
     return matched_pairs
+
+
+def smart_open(file_path: str, mode: str = None) -> IO[str] | gzip.GzipFile:
+    """Open a file as text or as a gzip file based on its magic number.
+
+    Args:
+        file_path (str): Path to the file to be opened.
+        mode (str): Mode in which the file should be opened. Defaults to 'rt' (read text).
+
+    Returns:
+        Union[IO[str], gzip.GzipFile]: A file object or a gzip file object.
+    """
+    with open(file_path, "rb") as f:
+        first_two_bytes = f.read(2)
+
+    if first_two_bytes == b"\x1f\x8b":  # Magic number for gzip files
+        return gzip.open(file_path, "rt" if mode is None else mode)
+    else:
+        return open(file_path, "r" if mode is None else mode)
 
 
 def cat_fastq(
