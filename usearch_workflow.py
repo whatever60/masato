@@ -510,7 +510,78 @@ def cluster_uparse(
     )
 
 
-def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
+def unoise3(
+    input_fastq: str,
+    output_fasta: str,
+    min_size: int,
+    relabel: str = "ZOTU",
+    num_threads: int = 16,
+):
+    qc_proc = subprocess.Popen(
+        [
+            "vsearch",
+            "--fastq_filter",
+            input_fastq,
+            "--fastqout",
+            "-",
+            "--fastq_maxee",
+            "0.5",
+            "--fastq_minlen",
+            "100",
+            "--fastq_maxns",
+            "0",
+            "--relabel",
+            "filtered",
+            # "--threads",
+            # str(num_threads),
+        ],
+        stdout=subprocess.PIPE,
+    )
+    uniq_proc = subprocess.Popen(
+        [
+            "vsearch",
+            "--fastx_uniques",
+            "-",
+            "--fastaout",
+            "-",
+            "--sizeout",
+        ],
+        stdin=qc_proc.stdout,
+        stdout=subprocess.PIPE,
+    )
+    unoise3_proc = subprocess.Popen(
+        [
+            "vsearch",
+            "--cluster_unoise",
+            "-",
+            "--minsize",
+            str(min_size),
+            "--centroids",
+            "-",
+            "--threads",
+            str(num_threads),
+        ],
+        stdin=uniq_proc.stdout,
+        stdout=subprocess.PIPE,
+    )
+    uchime3_proc = subprocess.Popen(
+        [
+            "vsearch",
+            "--uchime3_denovo",
+            "-",
+            "--nonchimeras",
+            output_fasta,
+            "--relabel",
+            relabel,
+        ],
+        stdin=unoise3_proc.stdout,
+    )
+    uchime3_proc.wait()
+
+
+def cluster_unoise3(
+    uniq_fasta: str, out_fasta: str, minsize: int, relabel: str = "ZOTU"
+):
     if os.path.isdir(out_fasta):
         raise ValueError(f"Output fasta file {out_fasta} is a directory")
     output_dir = os.path.dirname(out_fasta)
@@ -545,7 +616,7 @@ def cluster_unoise3(uniq_fasta: str, minsize: int, out_fasta: str):
             "--nonchimeras",
             out_fasta,
             "--relabel",
-            "ZOTU",
+            relabel,
         ],
         stdin=unoise3_proc.stdout,
     )
@@ -935,6 +1006,32 @@ def main():
     cluster_unoise3_parser.add_argument(
         "-o", "--out_fasta", help="Output path for ZOTU fasta file"
     )
+    unoise3_parser = subparsers.add_parser(
+        "unoise3", help="Cluster reads using UNOISE3"
+    )
+    unoise3_parser.add_argument(
+        "-i",
+        "--input_fastq",
+        help="Input FASTQ file to cluster",
+        type=str,
+        required=True,
+    )
+    unoise3_parser.add_argument(
+        "-o",
+        "--output_fasta",
+        help="Output path for ZOTU fasta file",
+        type=str,
+        required=True,
+    )
+    unoise3_parser.add_argument(
+        "-m", "--minsize", type=int, default=8, help="Minimum cluster size"
+    )
+    unoise3_parser.add_argument(
+        "-l", "--relabel", type=str, default="ZOTU", help="Prefix for ZOTU labels"
+    )
+    unoise3_parser.add_argument(
+        "-t", "--num_threads", type=int, default=4, help="Number of threads to use"
+    )
     search_global_parser = subparsers.add_parser(
         "search_global", help="Search reads against a database"
     )
@@ -1001,6 +1098,14 @@ def main():
         )
     elif args.subcommand == "cluster_unoise3":
         cluster_unoise3(args.uniq_fasta, args.minsize, args.out_fasta)
+    elif args.subcommand == "unoise3":
+        unoise3(
+            args.input_fastq,
+            args.output_fasta,
+            args.minsize,
+            args.relabel,
+            args.num_threads,
+        )
     elif args.subcommand == "search_global":
         search_global(
             args.input_fastq,
