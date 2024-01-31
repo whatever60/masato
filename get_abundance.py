@@ -194,8 +194,7 @@ def _taxa_qc(
     if rel_ab_thres and int(rel_ab_thres) == rel_ab_thres:
         rare_taxa = df_tax_rel_ab.columns[
             (
-                df_tax_rel_ab.rank(axis=1, ascending=False, method="min")
-                > rel_ab_thres
+                df_tax_rel_ab.rank(axis=1, ascending=False, method="min") > rel_ab_thres
             ).all(axis=0)
         ].tolist()
     else:
@@ -211,75 +210,93 @@ def _taxa_qc(
         )
         df_tax_rel_ab = pd.concat([df_tax_rel_ab, df_tax_rel_ab_rare], axis=1)
     if not keep_unknown:
-        df_tax_rel_ab = df_tax_rel_ab.drop("unknown", axis=1)
-        df_tax_rel_ab = df_tax_rel_ab.div(df_tax_rel_ab.sum(axis=1), axis=0)
+        df_tax_rel_ab = df_tax_rel_ab[
+            df_tax_rel_ab.columns[~df_tax_rel_ab.columns.str.endswith("unknown")]
+        ]
+        df_tax_rel_ab = df_tax_rel_ab.div(df_tax_rel_ab.sum(axis=1), axis=0).fillna(0)
     return df_tax_rel_ab
 
 
 def read_tables(
     otu_count_table: str,
-    metadata_path: str,
-    otu_taxonomy_path: str,
+    metadata_path: str = None,
+    otu_taxonomy_path: str = None,
     warning: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
-    df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
-    df_tax = pd.read_table(otu_taxonomy_path, index_col="otu").rename(
-        {"otu.1": "otu"}, axis=1
-    )
-
-    # Indices of df_meta, df_tax, and df_otu_count must all be unique.
-    if not df_meta.index.is_unique:
-        raise ValueError("Sample names in metadata must be unique.")
-    if not df_tax.index.is_unique:
-        raise ValueError("OTU numbers in taxonomy table must be unique.")
     if not df_otu_count.columns.is_unique:
         raise ValueError("Sample names in OTU count table must be unique.")
 
-    # add missing samples with all zero counts
-    missing_samples = list(set(df_meta.index) - set(df_otu_count.columns))
-    if missing_samples:
-        if warning:
-            print("WARNING: The following samples are missing from OTU count table:")
-            print("\t", end="")
-            print(*sorted(missing_samples), sep="\n\t")
-            print("Filling in missing samples with all zero counts.")
-        df_otu_count = pd.concat(
-            [
-                df_otu_count,
-                pd.DataFrame(0, index=df_otu_count.index, columns=missing_samples),
-            ],
-            axis=1,
-        )
-    # only care about samples in metadata
-    df_otu_count = df_otu_count[df_meta.index].T
+    if metadata_path is not None:
+        df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
+        if not df_meta.index.is_unique:
+            raise ValueError("Sample names in metadata must be unique.")
 
-    # only care about OTUs with taxonomy
-    otu_in_tax = set(df_tax.index)
-    otu_in_count = set(df_otu_count.columns)
-    common_otus = list(otu_in_tax & otu_in_count)
-    no_tax_otus = list(otu_in_count - otu_in_tax)
-    df_tax = df_tax.loc[common_otus]
-    df_otu_count_w_tax = df_otu_count.loc[:, common_otus].copy()
-    df_otu_count_wo_tax = df_otu_count.loc[:, no_tax_otus]
-    df_otu_count_w_tax.loc[:, "unknown"] = df_otu_count_wo_tax.sum(axis=1)
-    df_otu_count = df_otu_count_w_tax
-    # add a dummy row for unknown OTUs and a dummy column for OTU
-    df_tax.loc["unknown"] = "unknown"
-    df_tax.loc["unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
-    if "otu" not in df_tax.columns:
-        df_tax["otu"] = df_tax.index
-    if "otu_p" not in df_tax.columns:
-        df_tax["otu_p"] = 1
+        # add missing samples with all zero counts
+        missing_samples = list(set(df_meta.index) - set(df_otu_count.columns))
+        if missing_samples:
+            if warning:
+                print(
+                    "WARNING: The following samples are missing from OTU count table:"
+                )
+                print("\t", end="")
+                print(*sorted(missing_samples), sep="\n\t")
+                print("Filling in missing samples with all zero counts.")
+            df_otu_count = pd.concat(
+                [
+                    df_otu_count,
+                    pd.DataFrame(0, index=df_otu_count.index, columns=missing_samples),
+                ],
+                axis=1,
+            )
+        # only care about samples in metadata
+        df_otu_count = df_otu_count[df_meta.index].transpose()
+    else:
+        df_otu_count = df_otu_count.transpose()
+        df_meta = pd.DataFrame(index=df_otu_count.index)
+
+    if otu_taxonomy_path is not None:
+        # df_tax = pd.read_table(otu_taxonomy_path, index_col="otu").rename(
+        #     {"otu.1": "otu"}, axis=1
+        # )
+        df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
+        if not df_tax.index.is_unique:
+            raise ValueError("OTU numbers in taxonomy table must be unique.")
+        if "otu" not in df_tax.columns:
+            df_tax["otu"] = df_tax.index
+        if "otu_p" not in df_tax.columns:
+            df_tax["otu_p"] = 1
+        # only care about OTUs with taxonomy
+        otu_in_tax = set(df_tax.index)
+        otu_in_count = set(df_otu_count.columns)
+        common_otus = list(otu_in_tax & otu_in_count)
+        no_tax_otus = list(otu_in_count - otu_in_tax)
+        df_tax = df_tax.loc[common_otus]
+        df_otu_count_w_tax = df_otu_count.loc[:, common_otus].copy()
+        df_otu_count_wo_tax = df_otu_count.loc[:, no_tax_otus]
+        prefix = df_tax.index[0].split("-")[0] + "-"
+        df_otu_count_w_tax.loc[:, f"{prefix}unknown"] = df_otu_count_wo_tax.sum(axis=1)
+        df_otu_count = df_otu_count_w_tax
+        # add a dummy row for unknown OTUs and a dummy column for OTU
+        df_tax.loc[f"{prefix}unknown"] = "unknown"
+        df_tax.loc[
+            f"{prefix}unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]
+        ] = -1
+    else:
+        df_tax = pd.DataFrame(index=df_otu_count.columns)
+        # df_tax["otu"] = df_tax.index
+        # df_tax["otu_p"] = 1
     return df_otu_count, df_meta, df_tax
 
 
 def find_spikein_otus(
     df_meta: pd.DataFrame,
     df_tax: pd.DataFrame,
-    spikein_taxa_key: str,
+    spikein_taxa_key: str = None,
     only_otus: bool = False,
 ) -> dict[str, list[str]] | list[str]:
+    if spikein_taxa_key is None:
+        return []
     try:
         all_spikeins = (
             df_meta[spikein_taxa_key]
@@ -302,13 +319,14 @@ def find_spikein_otus(
 
 def get_otu_count(
     otu_count_table: str,
-    metadata_path: str,
-    otu_taxonomy_path: str,
+    metadata_path: str = None,
+    otu_taxonomy_path: str = None,
     sample_weight_key: str = None,
     spikein_taxa_key: str = None,
+    warning: bool = True,
 ) -> pd.DataFrame:
     df_otu_count, df_meta, df_tax = read_tables(
-        otu_count_table, metadata_path, otu_taxonomy_path
+        otu_count_table, metadata_path, otu_taxonomy_path, warning=warning
     )
     df_meta = _calc_norm_factor(
         df_otu_count,

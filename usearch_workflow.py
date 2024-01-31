@@ -514,7 +514,7 @@ def unoise3(
     input_fastq: str,
     output_fasta: str,
     min_size: int,
-    relabel: str = "ZOTU",
+    relabel_prefix: str = None,
     num_threads: int = 16,
 ):
     qc_proc = subprocess.Popen(
@@ -572,7 +572,7 @@ def unoise3(
             "--nonchimeras",
             output_fasta,
             "--relabel",
-            relabel,
+            "ZOTU" if relabel_prefix is None else f"{relabel_prefix}-ZOTU",
         ],
         stdin=unoise3_proc.stdout,
     )
@@ -1027,7 +1027,7 @@ def main():
         "-m", "--minsize", type=int, default=8, help="Minimum cluster size"
     )
     unoise3_parser.add_argument(
-        "-l", "--relabel", type=str, default="ZOTU", help="Prefix for ZOTU labels"
+        "-l", "--relabel_prefix", type=str, default=None, help="Prefix for ZOTU labels"
     )
     unoise3_parser.add_argument(
         "-t", "--num_threads", type=int, default=4, help="Number of threads to use"
@@ -1103,7 +1103,7 @@ def main():
             args.input_fastq,
             args.output_fasta,
             args.minsize,
-            args.relabel,
+            args.relabel_prefix,
             args.num_threads,
         )
     elif args.subcommand == "search_global":
