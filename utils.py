@@ -186,6 +186,64 @@ def cat_fastq(
                 )
 
 
+def cat_fastq_se(
+    directory: str,
+    output_fp,
+    metadata: str = None,
+    _remove_undet: bool = True,
+    _have_sample_name: bool = False,
+):
+    """Similar as above but simply list all fastq/fq/fastq.gz/fq.gz files in the
+    directory and concatenate them into a single file with new read names. Good for
+    single-end reads.
+    """
+    fastq_files = (
+        glob.glob(os.path.join(directory, "*.fastq.gz"))
+        + glob.glob(os.path.join(directory, "*.fq.gz"))
+        + glob.glob(os.path.join(directory, "*.fastq"))
+        + glob.glob(os.path.join(directory, "*.fq"))
+    )
+
+    if metadata is not None:
+        samples_in_meta = pd.read_table(metadata, index_col=0).index.to_list()
+    else:
+        samples_in_meta = None
+
+    if isinstance(output_fp, gzip.GzipFile) or isinstance(output_fp, io.BufferedWriter):
+
+        def write_line(line):
+            output_fp.write(line.encode())
+
+    elif isinstance(output_fp, io.TextIOBase):
+
+        def write_line(line):
+            output_fp.write(line)
+
+    else:
+        raise ValueError("Output file pointer must be gzip or text file.")
+
+    if _have_sample_name:
+        rename_read = _rename_read_concat
+    else:
+        rename_read = _rename_read_illumina
+
+    for file_ in tqdm(fastq_files):
+        # match = PATTERN_ILLUMINA.search(os.path.basename(file_))
+        # if match:
+            # sample_name = match.group(1)
+        sample_name = os.path.basename(file_).split(".")[0].split("_")[0]
+        if samples_in_meta is not None and sample_name not in samples_in_meta:
+            continue
+        if _remove_undet and sample_name == "Undetermined":
+            continue
+        with smart_open(file_) as f:
+            for read_index, lines in enumerate(zip(*[f] * 4, strict=True), start=1):
+                write_line(
+                    rename_read(lines[0], sample_name, 1, read_index)
+                    + "".join(lines[1:])
+                )
+
+
 def _rename_read_illumina(
     header_line: str, sample_name: str, read_number: int, read_index: int
 ) -> str:
