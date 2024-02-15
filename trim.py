@@ -8,19 +8,26 @@ import argparse
 
 from Bio.Seq import Seq
 
-from utils import cat_fastq
-
-
-PRIMER_ITS_5 = "GTACCTGCGGARGGATCA"
-PRIMER_ITS_7 = "ATGAGATCCRTTGYTRAAAGTT"
-PRIMER_16S_5 = "GTGTGYCAGCMGCCGCGGTAA"
-PRIMER_16S_7 = "CCGGACTACNVGGGTWTCTAAT"
+from utils import cat_fastq, cat_fastq_se, smart_open
 
 
 def get_rc(seq: str) -> str:
     """Return the reverse complement of the given sequence."""
     return str(Seq(seq).reverse_complement())
 
+
+PRIMER_ITS_5 = "GTACCTGCGGARGGATCA"
+PRIMER_ITS_7 = "ATGAGATCCRTTGYTRAAAGTT"
+PRIMER_16S_5 = "GTGTGYCAGCMGCCGCGGTAA"
+PRIMER_16S_7 = "CCGGACTACNVGGGTWTCTAAT"
+PRIMER_TN5 = "AGATGTGTATAAGAGACAG"
+# PRIMER_MAPS_0 = "GCGAGACACTGCTGAGCG"
+# PRIMER_MAPS_1 = "GTCACTCCAGCCTCGTCG"
+# PRIMER_MAPS_2 = "AGGCAGCGTCTGTAGCGA"
+PRIMER_MAPS_1 = "GCGAGACACTGCTGAGCG"
+PRIMER_MAPS_2 = "GTCACTCCAGCCTCGTCG"
+PRIMER_MAPS_3 = "GTGTTCGTCGGCAGCGTC" + PRIMER_TN5
+PRIMER_MAPS_r = "GTCTCGTGGGCTCGG" + PRIMER_TN5
 
 def run_trim_galore(input_dir, output_dir, pair):
     """Run trim_galore on the given pair of files."""
@@ -260,6 +267,33 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
     os.chdir(original_dir)
 
 
+def get_primer_set(name: str) -> tuple[str, str]:
+    if name == "its":
+        return (
+            f"{PRIMER_ITS_5}...{get_rc(PRIMER_ITS_7)}",
+            f"{PRIMER_ITS_7}...{get_rc(PRIMER_ITS_5)}",
+        )
+    elif name == "16s":
+        return (
+            f"{PRIMER_16S_5}...{get_rc(PRIMER_16S_7)}",
+            f"{PRIMER_16S_7}...{get_rc(PRIMER_16S_5)}",
+        )
+    # elif name == "maps_0":
+    #     # optional
+    #     return f"{PRIMER_MAPS_0}...{get_rc(PRIMER_MAPS_r)}", None
+    elif name == "maps_1":
+        # anchor
+        return f"^{PRIMER_MAPS_1};required...{get_rc(PRIMER_MAPS_r)};optional", None
+    elif name == "maps_2":
+        # anchor
+        return f"^{PRIMER_MAPS_2}", None
+    elif name == "maps_3":
+        # anchor
+        return f"^{PRIMER_MAPS_3}", None
+    else:
+        raise ValueError("Invalid primer set. Must be either its or 16s.")
+
+
 def isolate_150_preprocess(
     fastq_dir: str,
     barcode_fwd_fasta: str,
@@ -329,14 +363,7 @@ def isolate_150_preprocess(
     )
 
     # trim with cutadapt
-    if primer_set == "its":
-        i5, i7 = PRIMER_ITS_5, PRIMER_ITS_7
-    elif primer_set == "16s":
-        i5, i7 = PRIMER_16S_5, PRIMER_16S_7
-    else:
-        raise ValueError("Invalid primer set. Must be either its or 16s.")
-    a = f"{i5}...{get_rc(i7)}"
-    A = f"{i7}...{get_rc(i5)}"
+    a, A = get_primer_set(primer_set)
     cutadapt_trim_proc = subprocess.Popen(
         [
             "cutadapt",
@@ -382,6 +409,129 @@ def isolate_150_preprocess(
     # copy merged_1 to output_fastq
     shutil.copy(os.path.join(output_dir_cutadapt, output_fastq_r1), output_fastq)
     shutil.rmtree(output_dir_demux)
+
+
+def cutadapt_demux_merge_trim_se(
+    fastq_path: str,
+    output_fastq: str,
+    primer_set: str,
+    barcode_fastq: str,
+) -> None:
+    """Demultiplex and merge single-end reads using cutadapt."""
+    if not os.path.isfile(barcode_fastq):
+        raise ValueError(f"{barcode_fastq} does not exist.")
+    output_dir, output_f = os.path.split(output_fastq)
+    output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
+    output_dir_demux = os.path.join(output_dir, "demux")
+    output_dir_demux_fail = os.path.join(output_dir, "demux_failed")
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir_demux, exist_ok=True)
+    os.makedirs(output_dir_demux_fail, exist_ok=True)
+    os.makedirs(output_dir_cutadapt, exist_ok=True)
+
+    # demultiplex with cutadapt
+    proc_args = [
+        "cutadapt",
+        "-e",
+        "1",
+        "--no-indels",
+        "-g",
+        f"^file:{barcode_fastq}",
+        "-o",
+        os.path.join(output_dir_demux, "{name}.fq.gz"),
+    ]
+    if os.path.isdir(fastq_path):
+        proc_args.append("-")
+        cutadapt_demux_proc = subprocess.Popen(
+            proc_args,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        cat_fastq_se(
+            fastq_path,
+            output_fp=cutadapt_demux_proc.stdin,
+        )
+        cutadapt_demux_proc.stdin.close()
+        cutadapt_demux_proc.wait()
+    else:
+        proc_args.append(fastq_path)
+        subprocess.run(proc_args)
+
+    # no need for renaming
+    # rename_files_with_mmv(output_dir_demux, rename_pattern)
+
+    subprocess.run(
+        [
+            "mv",
+            os.path.join(output_dir_demux, "unknown.fq.gz"),
+            os.path.join(output_dir, "demux_failed"),
+        ]
+    )
+
+    a, _ = get_primer_set(primer_set)
+    cutadapt_trim_proc = subprocess.Popen(
+        [
+            "cutadapt",
+            # "-a" if "..." in a else "-g",
+            "-g",
+            a,
+            "-o",
+            output_fastq,
+            "--untrimmed-output",
+            os.path.join(output_dir_cutadapt, "untrimmed.fq.gz"),
+            # "--too-short-output",
+            # os.path.join(output_dir_cutadapt, "too_short.fq.gz"),
+            "--cores",
+            "8",
+            "-",
+        ],
+        stdin=subprocess.PIPE,
+        # silence cutadapt's output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    cat_fastq_se(
+        output_dir_demux,
+        output_fp=cutadapt_trim_proc.stdin,
+        _have_sample_name=True,
+    )
+    cutadapt_trim_proc.stdin.close()
+    cutadapt_trim_proc.wait()
+
+    shutil.rmtree(output_dir_demux)
+
+def cutadapt_merge_trim_se(fastq_path: str, output_fastq: str, primer_set: str) -> None:
+    output_dir, output_f = os.path.split(output_fastq)
+    os.makedirs(output_dir, exist_ok=True)
+    a, _ = get_primer_set(primer_set)
+    proc_args = [
+        "cutadapt",
+        # "-a" if "..." in a else "-g",
+        "-g",
+        a,
+        "-o",
+        output_fastq,
+        "--cores",
+        "8",
+    ]
+    if os.path.isdir(fastq_path):
+        proc_args.append("-")
+        cutadapt_trim_proc = subprocess.Popen(
+            proc_args,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        cat_fastq_se(
+            fastq_path,
+            output_fp=cutadapt_trim_proc.stdin
+        )
+        cutadapt_trim_proc.stdin.close()
+        cutadapt_trim_proc.wait()
+    else:
+        proc_args.append(fastq_path)
+        subprocess.run(proc_args)
 
 
 def merge(fastq_dir: str, output_dir: str) -> None:
@@ -513,12 +663,14 @@ if __name__ == "__main__":
         "-fb",
         "--barcode_fwd",
         type=str,
+        default=None,
         help="Barcode fasta file for forward reads",
     )
     parser.add_argument(
         "-rb",
         "--barcode_rev",
         type=str,
+        default=None,
         help="Barcode fasta file for reverse reads",
     )
     parser.add_argument(
@@ -531,7 +683,6 @@ if __name__ == "__main__":
         "-m",
         "--mode",
         type=str,
-        choices=["simple", "isolate_150"],
         default="simple",
         help="Processing mode",
     )
@@ -547,4 +698,31 @@ if __name__ == "__main__":
             args.pattern,
             args.output,
             primer_set=args.primer_set,
+        )
+    elif args.mode == "maps_round0":
+        cutadapt_merge_trim_se(
+            args.input_dir,
+            args.output,
+            primer_set="maps_0",
+        )
+    elif args.mode == "maps_round1":
+        cutadapt_demux_merge_trim_se(
+            args.input_dir,
+            args.output,
+            barcode_fastq=args.barcode_fwd,
+            primer_set="maps_1",
+        )
+    elif args.mode == "maps_round2":
+        cutadapt_demux_merge_trim_se(
+            args.input_dir,
+            args.output,
+            barcode_fastq=args.barcode_fwd,
+            primer_set="maps_2",
+        )
+    elif args.mode == "maps_round3":
+        cutadapt_demux_merge_trim_se(
+            args.input_dir,
+            args.output,
+            barcode_fastq=args.barcode_fwd,
+            primer_set="maps_3",
         )
