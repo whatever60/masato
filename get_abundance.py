@@ -203,11 +203,13 @@ def _taxa_qc(
         ].tolist()
     if "unknown" in rare_taxa:
         rare_taxa.remove("unknown")
-    df_tax_rel_ab = df_tax_rel_ab.drop(rare_taxa, axis=1)
-    if rare_taxa and keep_rare:
+    if not keep_rare:
+        df_tax_rel_ab = df_tax_rel_ab.drop(rare_taxa, axis=1)
+    elif rare_taxa:
         df_tax_rel_ab_rare = (
             df_tax_rel_ab[rare_taxa].sum(axis=1).to_frame(name="others")
         )
+        df_tax_rel_ab = df_tax_rel_ab.drop(rare_taxa, axis=1)
         df_tax_rel_ab = pd.concat([df_tax_rel_ab, df_tax_rel_ab_rare], axis=1)
     if not keep_unknown:
         df_tax_rel_ab = df_tax_rel_ab[
@@ -228,7 +230,10 @@ def read_tables(
         raise ValueError("Sample names in OTU count table must be unique.")
 
     if metadata_path is not None:
-        df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
+        if metadata_path.endswith(".csv"):
+            df_meta = pd.read_csv(metadata_path, index_col="sample", comment="#")
+        else:
+            df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
         if not df_meta.index.is_unique:
             raise ValueError("Sample names in metadata must be unique.")
 
