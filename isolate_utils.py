@@ -29,12 +29,12 @@ def read_isolate_metadata_rich(
         raise ValueError("Plate metadata barcode column is not unique")
     isolate_metadata = _read_isolate_metadata(isolate_metadata_dir)
     isolate_metadata.columns = ["picking_coord", "src_plate", "dest_well", "dest_plate"]
-    isolate_metadata = pd.merge(
-        isolate_metadata,
+    isolate_metadata = isolate_metadata.merge(
         plate_metadata[
             ["barcode", "medium_type", "sample_type", "sample_group"]
         ].rename({"barcode": "src_plate"}, axis=1),
         on="src_plate",
+        how="left",
     )
     isolate_metadata["dest_well_barcode"] = (
         isolate_metadata.dest_plate + "_" + isolate_metadata.dest_well
@@ -46,7 +46,7 @@ def read_isolate_metadata_rich(
         .astype(float)
         .to_numpy()
     )
-    return isolate_metadata.set_index("sample")
+    return isolate_metadata.set_index("sample").sort_index()
 
 
 def get_top_cols(
@@ -99,14 +99,6 @@ def get_isolate_purity(
         )
         df_purity_bacteria = get_top_cols(df_rab_b)
         df_purity_bacteria["total_counts"] = df_zotu_cb.sum(axis=1)
-        # df_purity_bacteria = df_purity_bacteria.join(
-        #     [
-        #         df_meta_b[
-        #             ["sequencing_depth", "medium_type", "sample_type", "sample_group"]
-        #         ],
-        #     ],
-        #     how="left",
-        # ).rename({"sequencing_depth": "total_counts"}, axis=1)
         both += 1
         ret.append(df_purity_bacteria)
     else:
@@ -154,6 +146,21 @@ def get_isolate_purity(
         ret.append(None)
     [df.sort_index(inplace=True) for df in ret if df is not None]
     return ret
+
+
+def combine_count(
+    df_isolate_meta_tsv: str,
+    df_zotu_count_bacteria_tsv: str,
+    df_zotu_count_fungi_tsv: str,
+) -> pd.DataFrame:
+    df_zotu_cb, _, _ = get_otu_count(
+        df_zotu_count_bacteria_tsv, df_isolate_meta_tsv, warning=False
+    )
+    df_zotu_cf, _, _ = get_otu_count(
+        df_zotu_count_fungi_tsv, df_isolate_meta_tsv, warning=False
+    )
+    return pd.concat([df_zotu_cb, df_zotu_cf], axis=1).fillna(0)
+    
 
 
 if __name__ == "__main__":
@@ -251,6 +258,43 @@ if __name__ == "__main__":
         type=str,
         metavar="OUTPUT_DIR",
     )
+
+    parser_combine = subparser.add_parser(
+        "combine_count",
+        description="Combine zotu count tables",
+    )
+    parser_combine.add_argument(
+        "-m",
+        "--isolate_meta",
+        help="Isolate metadata TSV file",
+        required=True,
+        type=str,
+        metavar="ISOLATE_METADATA_TSV",
+    )
+    parser_combine.add_argument(
+        "-cb",
+        "--zotu_count_bacteria",
+        help="Zotu count bacteria TSV file",
+        required=True,
+        type=str,
+        metavar="ZOTU_COUNT_BACTERIA_TSV",
+    )
+    parser_combine.add_argument(
+        "-cf",
+        "--zotu_count_fungi",
+        help="Zotu count fungi TSV file",
+        required=True,
+        type=str,
+        metavar="ZOTU_COUNT_FUNGI_TSV",
+    )
+    parser_combine.add_argument(
+        "-o",
+        "--output_tsv",
+        help="Output TSV file",
+        required=True,
+        type=str,
+        metavar="OUTPUT_TSV",
+    )
     args = parser.parse_args()
 
     if args.subcommand == "get_metadata":
@@ -283,5 +327,11 @@ if __name__ == "__main__":
             df_purity.to_csv(
                 os.path.join(args.output_dir, f"purity_{level}.tsv"), sep="\t"
             )
+    elif args.subcommand == "combine_count":
+        combine_count(
+            args.isolate_meta,
+            args.zotu_count_bacteria,
+            args.zotu_count_fungi,
+        ).to_csv(args.output_tsv, sep="\t")
     else:
         raise ValueError("Invalid subcommand")
