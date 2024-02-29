@@ -18,18 +18,40 @@ from matplotlib.ticker import FixedLocator
 from get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
 
 
-matplotlib.use("TkAgg")
-plt.rcParams["pdf.fonttype"] = 42
+def _get_dendrogram(df: pd.DataFrame, rows_to_ignore=None):
+    """Perform hierarchical clustering on the dataframe (treating rows as features and
+    columns as samples), reorder the rows and get the dendrogram, ignoring specified rows.
 
+    Args:
+    df (pd.DataFrame): The input dataframe.
+    rows_to_ignore (list, optional): Rows to ignore during clustering. Defaults to None.
 
-def _get_dendrogram(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """Perform hierarchical clustering on the dataframe (treating column as samples and
-    row as features), reorder the columns and get the dendrogram.
+    Returns:
+    tuple: A tuple containing the reordered dataframe and the linkage matrix.
     """
-    linked = linkage(df.transpose(), "single")
+    if rows_to_ignore is None:
+        rows_to_ignore = []
+    not_in_df = set(rows_to_ignore) - set(df.index)
+    if not_in_df:
+        print(
+            f"WANRING: `rows_to_ignore` contains rows not in the dataframe: {not_in_df}"
+        )
+        rows_to_ignore = [i for i in rows_to_ignore if i not in not_in_df]
+
+    # Separate the dataframe into rows to cluster and rows to ignore
+    rows_to_cluster = df.index.difference(rows_to_ignore)
+    df_to_cluster = df.loc[rows_to_cluster]
+
+    # Perform hierarchical clustering on the rows to be clustered
+    linked = linkage(df_to_cluster, "single", optimal_ordering=False)
     order = leaves_list(linked)
-    df = df.iloc[:, order]
-    return df, linked
+
+    # Reorder the dataframe based on the clustering result, appending ignored rows at the end
+    reordered_df = pd.concat(
+        [df_to_cluster.iloc[order], df.loc[rows_to_ignore]], axis=0
+    )
+
+    return reordered_df, linked
 
 
 def _stacked_bar(
@@ -81,13 +103,18 @@ def _heatmap(
     dfs: list[pd.DataFrame],
     names: list[str],
     title: str,
-    axs: list[list[plt.Axes]],
+    fig: plt.Figure,
+    axs_heatmap: list[plt.Axes],
+    axs_dend: list[plt.Axes],
     cmap: str,
+    linkage_row: np.ndarray = None,
     cbar_label: str = None,
     vmax: float | None = None,
     vmin: float | None = None,
 ) -> None:
-    for i, (ax_dend, ax, df, name) in enumerate(zip(axs[0], axs[1], dfs, names)):
+    for i, (ax, ax_dend, df, name) in enumerate(
+        zip(axs_heatmap, axs_dend, dfs, names, strict=True)
+    ):
         # df = df.copy()
         # columns = []
         # for j in df.columns:
@@ -101,14 +128,15 @@ def _heatmap(
         #         raise ValueError(f"Unknown column: {j}")
         # df.columns = columns
 
-        if cbar_label is not None and i == len(axs[1]) - 1:
+        if cbar_label is not None and i == len(axs_heatmap) - 1:
             cbar = True
+            height = axs_heatmap[i - 1].get_position().height * 0.4
             cbar_ax = fig.add_axes(
                 [
-                    ax.get_position().x1 + 0.03,
-                    axs[1][i - 1].get_position().y0,
+                    ax.get_position().x1 + (0.03 if linkage_row is None else 0.12),
+                    axs_heatmap[i - 1].get_position().y1 - height,
                     0.03,
-                    axs[1][i - 1].get_position().height,
+                    height,
                 ]
             )
             cbar_ax.yaxis.label.set_size(12)
@@ -119,7 +147,8 @@ def _heatmap(
             cbar_kws = None
 
         if ax_dend is not None:
-            df, linked = _get_dendrogram(df)
+            df, linked = _get_dendrogram(df.transpose())
+            df = df.transpose()
         sns.heatmap(
             df,
             ax=ax,
@@ -130,7 +159,7 @@ def _heatmap(
             cbar_kws=cbar_kws,
             vmax=vmax,
             vmin=vmin,
-            # square=True,
+            square=True,
         )
         ax.set_xlabel("")
         ax.tick_params(axis="x", labelrotation=90)
@@ -144,6 +173,28 @@ def _heatmap(
             ax_dend.set_title(name)
         else:
             ax.set_title(name)
+
+        if linkage_row is not None and i == len(axs_heatmap) - 1:
+            dend_row_ax = fig.add_axes(
+                [
+                    ax.get_position().x1 + 0.01,
+                    axs_heatmap[i - 1].get_position().y0,
+                    0.1,
+                    axs_heatmap[i - 1].get_position().height,
+                ]
+            )
+            dend_row_ax.axis("off")
+            dendrogram(
+                linkage_row,
+                ax=dend_row_ax,
+                orientation="right",
+                link_color_func=_black_color_func,
+            )
+            num_elements_in_linkage = linkage_row.shape[0] + 1
+            num_elements_not_in_linkage = df.shape[0] - num_elements_in_linkage
+            ylow = -10 * num_elements_not_in_linkage
+            yhigh = df.shape[0] * 10 + ylow
+            dend_row_ax.set_ylim(ylow, yhigh)
 
         # turn off y axis ticks and tick labels (set invisible) except for the first panel
         if i == 0:
@@ -369,6 +420,10 @@ def rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
 
 
 if __name__ == "__main__":
+
+    matplotlib.use("TkAgg")
+    plt.rcParams["pdf.fonttype"] = 42
+
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
 
@@ -403,6 +458,15 @@ if __name__ == "__main__":
         default=False,
         help="Perform hierarchical clustering on samples in each group, order them "
         "accordingly and add a dendrogram at the top. Only affects heatmap, not "
+        "stacked bar plot.",
+    )
+    parser_ab.add_argument(
+        "-fc",
+        "--feature_hierarchy_clustering",
+        action="store_true",
+        default=False,
+        help="Perform hierarchical clustering on features in each group, order them "
+        "accordingly and add a dendrogram at the left. Only affects heatmap, not "
         "stacked bar plot.",
     )
 
@@ -452,11 +516,12 @@ if __name__ == "__main__":
         rel_ab_thresholds = args.rel_ab_thresholds
         plot_type = args.plot_type
         sample_hierarchical_clustering = args.sample_hierarchical_clustering
+        feature_hierarchy_clustering = args.feature_hierarchy_clustering
 
         # process into relative abundance and aggregate at replication group level
         df_otu_rel_ab_g = _agg_along_axis(
             df_otu_count.div(df_otu_count.sum(axis=1), axis=0),
-            df_meta[rep_group_key],
+            df_meta[sample_group_key] + "\t" + df_meta[rep_group_key],
             axis=0,
         )
         if len(rel_ab_thresholds) == 1:
@@ -474,8 +539,13 @@ if __name__ == "__main__":
             )
             res = res[sorted(res.columns)]
             res_group_list = [
-                res.loc[group[rep_group_key].unique()] for group in groups
+                res.loc[name + "\t" + group[rep_group_key].unique()]
+                for name, group in zip(names, groups)
             ]
+            # fix index
+            for res_group in res_group_list:
+                res_group.index = res_group.index.map(lambda x: x.split("\t")[1])
+
             num_cols = len(res_group_list)
             # wspace, hspace = 0.1, 0.01
 
@@ -512,9 +582,9 @@ if __name__ == "__main__":
                 )
                 if plot_type in ["heatmap_log10", "all"]:
                     if sample_hierarchical_clustering:
-                        fig, axs = _get_subplots(num_cols, size, ratio)
+                        fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
                     else:
-                        fig, axs = _get_subplots(
+                        fig, (axs_dend, axs) = _get_subplots(
                             num_cols, size, ratio, height_ratios=None
                         )
                     # pesudo_abundance = 1e-4
@@ -526,16 +596,33 @@ if __name__ == "__main__":
                         arr[arr == 0] = vmin
                         return np.log10(arr)
 
+                    dfs = [
+                        _get_log10(res_group.transpose())
+                        for res_group in res_group_list
+                    ]
+                    df = pd.concat(dfs, axis=1)
+                    if feature_hierarchy_clustering:
+                        df, linkage_row = _get_dendrogram(
+                            df, rows_to_ignore=["unknown", "others"]
+                        )
+                        dfs_temp = []
+                        i = 0
+                        for df_temp in dfs:
+                            dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                            i += df_temp.shape[1]
+                        dfs = dfs_temp
+                    else:
+                        linkage_row = None
                     _heatmap(
-                        [
-                            _get_log10(res_group.transpose())
-                            for res_group in res_group_list
-                        ],
+                        dfs,
                         names,
                         title=f"Taxonomy at {level} level",
-                        cbar_label=f"log10(relative abundance) (range: [{vmin:.0e}, {vmax}])",
-                        axs=axs,
+                        cbar_label=f"log10(relative abundance)\n(range: [{vmin:.0e}, {vmax}])",
+                        fig=fig,
+                        axs_heatmap=axs,
+                        axs_dend=axs_dend,
                         cmap="rocket_r",
+                        linkage_row=linkage_row,
                         vmax=np.log10(vmax),
                         vmin=np.log10(vmin),
                     )
@@ -551,18 +638,35 @@ if __name__ == "__main__":
                     )
                 if plot_type in ["heatmap"]:
                     if sample_hierarchical_clustering:
-                        fig, axs = _get_subplots(num_cols, size, ratio)
+                        fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
                     else:
-                        fig, axs = _get_subplots(
+                        fig, (axs_dend, axs) = _get_subplots(
                             num_cols, size, ratio, height_ratios=None
                         )
+                    dfs = ([res_group.T for res_group in res_group_list],)
+                    df = pd.concat(dfs, axis=1)
+                    if feature_hierarchy_clustering:
+                        df, linkage_row = _get_dendrogram(
+                            df, rows_to_ignore=["unknown", "others"]
+                        )
+                        dfs_temp = []
+                        i = 0
+                        for df_temp in dfs:
+                            dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                            i += df_temp.shape[1]
+                        dfs = dfs_temp
+                    else:
+                        linkage_row = None
                     _heatmap(
-                        [res_group.T for res_group in res_group_list],
+                        dfs,
                         names,
                         title=f"Taxonomy at {level} level",
                         cbar_label="relative abundance",
-                        axs=axs,
+                        fig=fig,
+                        axs_heatmap=axs_heatmap,
+                        axs_dend=axs_dend,
                         cmap=None,
+                        linkage_row=linkage_row,
                     )
                     fig.savefig(
                         f"{fig_dir}/rel_ab_group_{level}_hm.png",
@@ -577,20 +681,39 @@ if __name__ == "__main__":
                 if plot_type in ["heatmap_binary"]:
                     size = size[0], size[1] / 2
                     if sample_hierarchical_clustering:
-                        fig, axs = _get_subplots(num_cols, size, ratio)
+                        fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
+                        axs_heatmap, axs_dend = axs
                     else:
-                        fig, axs = _get_subplots(
+                        fig, (axs_dend, axs) = _get_subplots(
                             num_cols, size, ratio, height_ratios=None
                         )
+                        axs_heatmap = axs
+                        axs_dend = [None] * num_cols
+                    dfs = [
+                        (res_group > 0).astype(int).T for res_group in res_group_list
+                    ]
+                    df = pd.concat(dfs, axis=1)
+                    if feature_hierarchy_clustering:
+                        df, linkage_row = _get_dendrogram(
+                            df, rows_to_ignore=["unknown", "others"]
+                        )
+                        dfs_temp = []
+                        i = 0
+                        for df_temp in dfs:
+                            dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                            i += df_temp.shape[1]
+                        dfs = dfs_temp
+                    else:
+                        linkage_row = None
                     _heatmap(
-                        [
-                            (res_group > 0).astype(int).T
-                            for res_group in res_group_list
-                        ],
+                        dfs,
                         names,
                         title=f"Taxonomy at {level} level",
-                        axs=axs,
+                        fig=fig,
+                        axs_heatmap=axs_heatmap,
+                        axs_dend=axs_dend,
                         cmap="BuPu",
+                        linkage_row=linkage_row,
                     )
                     fig.savefig(
                         f"{fig_dir}/rel_ab_group_{level}_hmb.png",
@@ -681,8 +804,10 @@ if __name__ == "__main__":
             ):
                 title = f"{title_prefix} {title}"
                 fig, axs = plt.subplots(
-                    1, len(groups), sharey="row", width_ratios=ratio, figsize=(12, 3)
+                    1, len(groups), sharey="row", width_ratios=ratio, figsize=(width, 3)
                 )
+                if len(groups) == 1:
+                    axs = [axs]
                 _barplot_with_whisker_strip(
                     groups,
                     names=names,
@@ -716,8 +841,10 @@ if __name__ == "__main__":
         )
         _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
         fig, axs = plt.subplots(
-            1, len(groups), sharey="row", width_ratios=ratio, figsize=(12, 3)
+            1, len(groups), sharey="row", width_ratios=ratio, figsize=(width, 3)
         )
+        if len(groups) == 1:
+            axs = [axs]
         fig.subplots_adjust(wspace=wspace)
         _barplot_with_whisker_strip(
             groups,

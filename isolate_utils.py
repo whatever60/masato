@@ -152,15 +152,25 @@ def combine_count(
     df_isolate_meta_tsv: str,
     df_zotu_count_bacteria_tsv: str,
     df_zotu_count_fungi_tsv: str,
+    df_taxonomy_bacteria_tsv: str = None,
+    df_taxonomy_fungi_tsv: str = None,
 ) -> pd.DataFrame:
-    df_zotu_cb, _, _ = get_otu_count(
-        df_zotu_count_bacteria_tsv, df_isolate_meta_tsv, warning=False
+    df_zotu_cb, _, df_taxonomy_bacteria = get_otu_count(
+        df_zotu_count_bacteria_tsv,
+        df_isolate_meta_tsv,
+        df_taxonomy_bacteria_tsv,
+        warning=False,
     )
-    df_zotu_cf, _, _ = get_otu_count(
-        df_zotu_count_fungi_tsv, df_isolate_meta_tsv, warning=False
+    df_zotu_cf, _, df_taxonomy_fungi = get_otu_count(
+        df_zotu_count_fungi_tsv,
+        df_isolate_meta_tsv,
+        df_taxonomy_fungi_tsv,
+        warning=False,
     )
-    return pd.concat([df_zotu_cb, df_zotu_cf], axis=1).fillna(0)
-    
+    return (
+        pd.concat([df_zotu_cb, df_zotu_cf], axis=1).fillna(0),
+        pd.concat([df_taxonomy_bacteria, df_taxonomy_fungi]),
+    )
 
 
 if __name__ == "__main__":
@@ -288,13 +298,38 @@ if __name__ == "__main__":
         metavar="ZOTU_COUNT_FUNGI_TSV",
     )
     parser_combine.add_argument(
-        "-o",
-        "--output_tsv",
-        help="Output TSV file",
+        "-tb",
+        "--taxonomy_bacteria",
+        help="Taxonomy bacteria TSV file",
+        default=None,
+        type=str,
+        metavar="TAXONOMY_BACTERIA_TSV",
+    )
+    parser_combine.add_argument(
+        "-tf",
+        "--taxonomy_fungi",
+        help="Taxonomy fungi TSV file",
+        default=None,
+        type=str,
+        metavar="TAXONOMY_FUNGI_TSV",
+    )
+    parser_combine.add_argument(
+        "-oc",
+        "--output_count_tsv",
+        help="Output count TSV file",
         required=True,
         type=str,
-        metavar="OUTPUT_TSV",
+        metavar="OUTPUT_COUNT_TSV",
     )
+    parser_combine.add_argument(
+        "-ot",
+        "--output_taxonomy_tsv",
+        help="Output taxonomy TSV file",
+        required=False,
+        type=str,
+        metavar="OUTPUT_TAXONOMY_TSV",
+    )
+
     args = parser.parse_args()
 
     if args.subcommand == "get_metadata":
@@ -328,10 +363,14 @@ if __name__ == "__main__":
                 os.path.join(args.output_dir, f"purity_{level}.tsv"), sep="\t"
             )
     elif args.subcommand == "combine_count":
-        combine_count(
+        combined_count, combined_tax = combine_count(
             args.isolate_meta,
             args.zotu_count_bacteria,
             args.zotu_count_fungi,
-        ).to_csv(args.output_tsv, sep="\t")
+            args.taxonomy_bacteria,
+            args.taxonomy_fungi,
+        )
+        combined_count.to_csv(args.output_count_tsv, sep="\t")
+        combined_tax.to_csv(args.output_taxonomy_tsv, sep="\t")
     else:
         raise ValueError("Invalid subcommand")

@@ -637,7 +637,12 @@ def _fq2fa(input_fastq: str, output_fasta: str) -> None:
 
 
 def search_global(
-    input_fastq: str, zotu_fasta: str, output_tsv: str, id_: float, num_threads: int
+    input_fastq: str,
+    zotu_fasta: str,
+    output_tsv: str,
+    id_: float,
+    unknown_name: str,
+    num_threads: int,
 ):
     if not os.path.isfile(zotu_fasta):
         raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
@@ -684,7 +689,7 @@ def search_global(
     counter = {i: 0 for i in zotu_table.columns}
     for record in SeqIO.parse(output_not_matched, "fasta"):
         counter[record.id.split("=")[1]] += 1
-    zotu_table.loc["ZOTU_UNKNOWN"] = pd.Series(counter)
+    zotu_table.loc[unknown_name] = pd.Series(counter)
     zotu_table.to_csv(f"{output_dir}/unoise3_zotu.tsv", sep="\t")
 
 
@@ -1052,6 +1057,12 @@ def main():
         "--id", type=float, default=0.9, help="Minimum cluster identity"
     )
     search_global_parser.add_argument(
+        "--unknown_name",
+        type=str,
+        default="ZOTU_UNKNOWN",
+        help="Name for unknown ZOTUs",
+    )
+    search_global_parser.add_argument(
         "-t", "--num_threads", type=int, default=8, help="Number of threads to use"
     )
 
@@ -1112,6 +1123,7 @@ def main():
             args.zotu_fasta,
             args.output_tsv,
             args.id,
+            args.unknown_name,
             args.num_threads,
         )
     elif args.subcommand == "tax_nbc":

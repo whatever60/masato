@@ -19,10 +19,6 @@ import seaborn as sns
 
 from get_abundance import get_otu_count, _agg_along_axis
 
-# configure matplotlib PDF saving to use text instead of vector graphics
-plt.rcParams["pdf.fonttype"] = 42
-matplotlib.use("TkAgg")
-
 
 def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     meta = pd.read_table(metadata_path, index_col=0)
@@ -35,7 +31,6 @@ def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]
 
     nonzero = df.sum(axis=1).astype(bool)
     df = df.loc[nonzero]
-    # import pdb; pdb.set_trace()
     meta = meta.loc[nonzero]
 
     # source = []
@@ -89,6 +84,7 @@ def plot_dm(
     title: str = None,
     hue: str = None,
     style: str = None,
+    annotate_dots: bool = False,
     plot_ellipses: bool = False,
 ) -> None:
     if distance == "braycurtis":
@@ -175,6 +171,16 @@ def plot_dm(
 
     axs[1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
 
+    if annotate_dots:
+        for i, txt in enumerate(pc.index):
+            # annotate with small fontsize
+            axs[0].annotate(
+                txt, (pc["PC1"].iloc[i], pc["PC2"].iloc[i]), fontsize=6, alpha=0.4
+            )
+            axs[1].annotate(
+                txt, (pc["PC2"].iloc[i], pc["PC3"].iloc[i]), fontsize=6, alpha=0.4
+            )
+
     if plot_ellipses:
         for pc_dims, ax in zip([(1, 2), (2, 3)], axs):
             n = len(pc[hue].unique())
@@ -211,6 +217,10 @@ def plot_dm(
 if __name__ == "__main__":
     import argparse
 
+    # configure matplotlib PDF saving to use text instead of vector graphics
+    plt.rcParams["pdf.fonttype"] = 42
+    matplotlib.use("TkAgg")
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-i",
@@ -237,6 +247,12 @@ if __name__ == "__main__":
         help="Taxonomic levels to plot",
         nargs="+",
         required=True,
+    )
+    parser.add_argument(
+        "-s",
+        "--sample_group_key",
+        default="sample_group",
+        help="Column name in the metadata table to group samples",
     )
     parser.add_argument(
         "-r",
@@ -288,6 +304,12 @@ if __name__ == "__main__":
         default=None,
     )
     parser.add_argument(
+        "-a",
+        "--annotate_dots",
+        help="Annotate dots with sample names",
+        action="store_true",
+    )
+    parser.add_argument(
         "-e",
         "--ellipses",
         help="Plot ellipses",
@@ -301,6 +323,7 @@ if __name__ == "__main__":
     fig_dir = args.fig_dir
     tax_levels = args.tax_levels
     transform = args.transform
+    sample_group_key = args.sample_group_key
     rep_group_key = args.rep_group_key
     spikein_taxa_key = args.spikein_taxa_key
     sample_weight_key = args.sample_weight_key
@@ -308,6 +331,7 @@ if __name__ == "__main__":
     distance = args.distance
     hue = args.hue
     style = args.style
+    annotate_dots = args.annotate_dots
     ellipses = args.ellipses
 
     df_otu_count, df_meta, df_tax = get_otu_count(
@@ -334,9 +358,10 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"Unsupported transform: {transform}")
 
-    if rep_group_key is not None:
-        df_otu = _agg_along_axis(df_otu, df_meta[rep_group_key], axis=0)
-        df_meta = df_meta.groupby(rep_group_key).first()
+    if sample_group_key is not None and rep_group_key is not None:
+        group = df_meta[sample_group_key] + "-" + df_meta[rep_group_key]
+        df_otu = _agg_along_axis(df_otu, group, axis=0)
+        df_meta = df_meta.groupby(group).first()
     if log10:
         title_kw["log10"] = "log10 "
         df_otu = np.log10(df_otu + 1e-8)
@@ -371,5 +396,6 @@ if __name__ == "__main__":
             title=title_template.format(**title_kw, tax_level=level),
             hue=hue,
             style=style,
+            annotate_dots=annotate_dots,
             plot_ellipses=ellipses,
         )

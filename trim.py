@@ -29,6 +29,7 @@ PRIMER_MAPS_2 = "GTCACTCCAGCCTCGTCG"
 PRIMER_MAPS_3 = "GTGTTCGTCGGCAGCGTC" + PRIMER_TN5
 PRIMER_MAPS_r = "GTCTCGTGGGCTCGG" + PRIMER_TN5
 
+
 def run_trim_galore(input_dir, output_dir, pair):
     """Run trim_galore on the given pair of files."""
     r1_file, r2_file = pair
@@ -411,6 +412,38 @@ def isolate_150_preprocess(
     shutil.rmtree(output_dir_demux)
 
 
+def cutadapt_demux_se(fastq_path: str, output_dir: str, barcode_fastq: str):
+    if not os.path.isfile(barcode_fastq):
+        raise ValueError(f"{barcode_fastq} does not exist.")
+    output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
+    output_dir_demux = os.path.join(output_dir, "demux")
+    output_dir_demux_fail = os.path.join(output_dir, "demux_failed")
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir_demux, exist_ok=True)
+    os.makedirs(output_dir_demux_fail, exist_ok=True)
+    os.makedirs(output_dir_cutadapt, exist_ok=True)
+    # demultiplex with cutadapt
+    proc_args = [
+        "cutadapt",
+        "-e",
+        "0.2",
+        "--no-indels",
+        "-g",
+        f"^file:{barcode_fastq}",
+        "-o",
+        os.path.join(output_dir_demux, "{name}.fq.gz"),
+    ]
+    proc_args.append(fastq_path)
+    subprocess.run(proc_args)
+    subprocess.run(
+        [
+            "mv",
+            os.path.join(output_dir_demux, "unknown.fq.gz"),
+            os.path.join(output_dir, "demux_failed"),
+        ]
+    )
+
+
 def cutadapt_demux_merge_trim_se(
     fastq_path: str,
     output_fastq: str,
@@ -501,6 +534,7 @@ def cutadapt_demux_merge_trim_se(
 
     shutil.rmtree(output_dir_demux)
 
+
 def cutadapt_merge_trim_se(fastq_path: str, output_fastq: str, primer_set: str) -> None:
     output_dir, output_f = os.path.split(output_fastq)
     os.makedirs(output_dir, exist_ok=True)
@@ -523,10 +557,7 @@ def cutadapt_merge_trim_se(fastq_path: str, output_fastq: str, primer_set: str) 
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        cat_fastq_se(
-            fastq_path,
-            output_fp=cutadapt_trim_proc.stdin
-        )
+        cat_fastq_se(fastq_path, output_fp=cutadapt_trim_proc.stdin)
         cutadapt_trim_proc.stdin.close()
         cutadapt_trim_proc.wait()
     else:

@@ -204,6 +204,21 @@ def cat_fastq_se(
         + glob.glob(os.path.join(directory, "*.fq"))
     )
 
+    files = []
+    for file_ in fastq_files:
+        for pattern in [PATTERN_ILLUMINA, PATTERN_CUSTOM]:
+            match = pattern.search(os.path.basename(file_))
+            if match:
+                sample_name, read_type = match.groups()[:2]
+                read_type = {"1": "R1", "2": "R2"}.get(read_type, read_type)
+                if read_type not in ["R1", "R2"]:
+                    warnings.warn(f"Invalid read type for file: {file_}")
+                    continue
+                if read_type == "R2":
+                    continue
+                files.append((file_, sample_name, read_type))
+                break
+
     if metadata is not None:
         samples_in_meta = pd.read_table(metadata, index_col=0).index.to_list()
     else:
@@ -227,10 +242,10 @@ def cat_fastq_se(
     else:
         rename_read = _rename_read_illumina
 
-    for file_ in tqdm(fastq_files):
+    for file_ in tqdm(files):
         # match = PATTERN_ILLUMINA.search(os.path.basename(file_))
         # if match:
-            # sample_name = match.group(1)
+        # sample_name = match.group(1)
         sample_name = os.path.basename(file_).split(".")[0].split("_")[0]
         if samples_in_meta is not None and sample_name not in samples_in_meta:
             continue

@@ -92,7 +92,6 @@ def _calc_norm_factor(
         norm_factor = spikein_reads if otus_spikein else 1
         if sample_weight_key and row[sample_weight_key]:
             norm_factor *= row[sample_weight_key]
-
         return pd.Series(
             {
                 "spikein_reads": spikein_reads,
@@ -101,7 +100,16 @@ def _calc_norm_factor(
             }
         )
 
-    df_meta_add = df_meta.apply(compute_spikein_and_norm, axis=1)
+    if df_meta.shape[1]:
+        df_meta_add = df_meta.apply(compute_spikein_and_norm, axis=1)
+    else:
+        df_meta_add = pd.DataFrame(
+            {
+                "spikein_reads": -1,
+                "non_spikein_reads": df_otu_count.sum(axis=1),
+                "norm_factor": 1,
+            }
+        )
     df_meta = df_meta.join(df_meta_add)
     return df_meta
 
@@ -225,6 +233,41 @@ def read_tables(
     otu_taxonomy_path: str = None,
     warning: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    This function reads several tables from amplicon analysis, does necessary
+        preprocessing, and return tables as dataframes.
+
+    It reads OTU count table output by `VSEARCH` or `USERACH` where rows are sample
+        names and columns are OTU names. The header of the first column is `#OTU ID`.
+
+    Optionally, it takes a metadata table whose first column should be sample name. It
+        ensures each sample in the metadata has associated OTU counts. If some samples
+        are absent in the OTU count table, it fills in missing samples with all zero
+        counts. Samples not in the metadata will be removed from the OTU count table.
+        Samples in the returned OTU count table will be reordered according to the
+        metadata.
+
+    Optionally, it takes a taxonomy table whose the first column is OTU names and
+        columns are taxonomy levels, and each taxonomy level has a paired confidence
+        column. For example, the level `geuns` has a paired confidence column `geuns_p`.
+    This function takes the intersection of OTUs in the OTU count table and the taxonomy
+        table. If some OTUs do not have taxonomy, their count will be aggregated to a
+        new "unknown" column, and a new row will be added to the taxonomy dataframe
+        where taxonomy levels are "unknown" and confidences are -1.
+    This function also copies index to a new column `otu` and `otu_p` if not already
+        present.
+
+    If sample metadata is not provided, metadata dataframe will be initialized from the
+        samples in the OTU count table and have no columns.
+    If taxonomy is not provided, taxonomy dataframe will be initialized from the OTUs in
+        the OTU count table, and with only `otu` and `otu_p` columns.
+
+    Returns:
+        OTU count table: pd.DataFrame. Rows are samples, columns are OTUs, transposed
+            from the input table.
+        Sample metadata: pd.DataFrame.
+        OTU taxonomy: pd.DataFrame.
+    """
     df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
     if not df_otu_count.columns.is_unique:
         raise ValueError("Sample names in OTU count table must be unique.")
@@ -267,30 +310,26 @@ def read_tables(
         df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
         if not df_tax.index.is_unique:
             raise ValueError("OTU numbers in taxonomy table must be unique.")
-        if "otu" not in df_tax.columns:
-            df_tax["otu"] = df_tax.index
-        if "otu_p" not in df_tax.columns:
-            df_tax["otu_p"] = 1
         # only care about OTUs with taxonomy
         otu_in_tax = set(df_tax.index)
         otu_in_count = set(df_otu_count.columns)
-        common_otus = list(otu_in_tax & otu_in_count)
         no_tax_otus = list(otu_in_count - otu_in_tax)
-        df_tax = df_tax.loc[common_otus]
-        df_otu_count_w_tax = df_otu_count.loc[:, common_otus].copy()
-        df_otu_count_wo_tax = df_otu_count.loc[:, no_tax_otus]
-        prefix = df_tax.index[0].split("-")[0] + "-"
-        df_otu_count_w_tax.loc[:, f"{prefix}unknown"] = df_otu_count_wo_tax.sum(axis=1)
-        df_otu_count = df_otu_count_w_tax
-        # add a dummy row for unknown OTUs and a dummy column for OTU
-        df_tax.loc[f"{prefix}unknown"] = "unknown"
-        df_tax.loc[
-            f"{prefix}unknown", df_tax.columns[df_tax.columns.str.endswith("_p")]
-        ] = -1
+        if no_tax_otus:
+            common_otus = list(otu_in_tax & otu_in_count)
+            df_tax = df_tax.loc[common_otus]
+            df_tax_add = pd.DataFrame(
+                "unknown",
+                index=no_tax_otus,
+                columns=df_tax.columns,
+            )
+            df_tax_add.loc[:, df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
+            df_tax = pd.concat([df_tax, df_tax_add]).loc[df_otu_count.columns]
     else:
         df_tax = pd.DataFrame(index=df_otu_count.columns)
-        # df_tax["otu"] = df_tax.index
-        # df_tax["otu_p"] = 1
+    if "otu" not in df_tax.columns:
+        df_tax["otu"] = df_tax.index
+    if "otu_p" not in df_tax.columns:
+        df_tax["otu_p"] = 1
     return df_otu_count, df_meta, df_tax
 
 
