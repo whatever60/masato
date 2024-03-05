@@ -572,7 +572,7 @@ def unoise3(
             "--nonchimeras",
             output_fasta,
             "--relabel",
-            "ZOTU" if relabel_prefix is None else f"{relabel_prefix}-ZOTU",
+            relabel_prefix or "ZOTU",
         ],
         stdin=unoise3_proc.stdout,
     )

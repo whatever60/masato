@@ -19,11 +19,11 @@ from get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
 
 
 def _get_dendrogram(df: pd.DataFrame, rows_to_ignore=None):
-    """Perform hierarchical clustering on the dataframe (treating rows as features and
-    columns as samples), reorder the rows and get the dendrogram, ignoring specified rows.
+    """Perform hierarchical clustering on rows of the input dataframe, reorder the rows
+    and get the dendrogram, ignoring specified rows.
 
     Args:
-    df (pd.DataFrame): The input dataframe.
+    df (pd.DataFrame): The input dataframe. Rows should be what you want to cluster.
     rows_to_ignore (list, optional): Rows to ignore during clustering. Defaults to None.
 
     Returns:
@@ -60,36 +60,51 @@ def _stacked_bar(
     title: str,
     palette: list,
     axs: list[plt.Axes],
+    orientation: str = "vertical",
 ) -> None:
+    """Indices of input dataframes are samples, which is non-overlapping. Columns are
+    features, which should be exactly the same for all input dataframes.
+    """
     for i, (ax_dend, ax, df, name) in enumerate(zip(axs[0], axs[1], dfs, names)):
-        # df = df.copy()
-        # index = []
-        # for j in df.index:
-        #     if j.endswith("-Swab-combined"):
-        #         index.append(j[1] + "-Bulk")
-        #     elif j.endswith("-Scrape-R2A"):
-        #         index.append(j[1] + "-Plate-R2A")
-        #     elif j.endswith("-Scrape-TSA"):
-        #         index.append(j[1] + "-Plate-TSA")
-        #     else:
-        #         raise ValueError(f"Unknown column: {j}")
-        # df.index = index
-
-        df.plot(kind="bar", stacked=True, color=palette, ax=ax)
-        ax.set_xlabel("")
-        ax.set_ylabel("Relative abundance")
-        ax.set_title(name)
+        if orientation == "horizontal":
+            df = df.iloc[::-1]
 
         if ax_dend is not None:
+            df, linked = _get_dendrogram(df)
+            dendrogram(
+                linked,
+                ax=ax_dend,
+                leaf_rotation=90,
+                orientation="right" if orientation == "horizontal" else "top",
+                link_color_func=_black_color_func,
+            )
             ax_dend.axis("off")
 
+        if orientation == "vertical":
+            df.plot(kind="bar", stacked=True, color=palette, ax=ax)
+            ax.set_xlabel("")
+            ax.set_ylabel("Relative abundance")
+            ax.set_title(name)
+            ax.set_ylim(0, 1)
+        elif orientation == "horizontal":
+            df.plot(kind="barh", stacked=True, color=palette, ax=ax)
+            ax.set_ylabel("")
+            ax.set_xlabel("Relative abundance")
+            ax.set_title(name)
+            ax.set_xlim(0, 1)
+        else:
+            raise ValueError("Unknown orientation.")
         # set xticklabels size
         # ax.tick_params(axis="x", labelsize=6)
         # remove legend unless the last plot
         if i != len(axs[0]) - 1:
             ax.get_legend().remove()
         else:
-            ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
+            if orientation == "horizontal" and ax_dend is not None:
+                # put more to the right
+                ax.legend(loc="center left", bbox_to_anchor=(1.3, 0.5))
+            else:
+                ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
             ax.get_legend().set_title(title)
         ax.set_ylabel(ax.yaxis.get_label().get_text(), fontsize=14)
         ax.set_xlabel(ax.xaxis.get_label().get_text(), fontsize=14)
@@ -165,6 +180,15 @@ def _heatmap(
         ax.tick_params(axis="x", labelrotation=90)
 
         if ax_dend is not None:
+            # enforce ax_dend to have the same width as ax
+            ax_dend.set_position(
+                [
+                    ax.get_position().x0,
+                    ax_dend.get_position().y0,
+                    ax.get_position().width,
+                    ax_dend.get_position().height,
+                ]
+            )
             # plot dendrogram
             dendrogram(
                 linked, ax=ax_dend, leaf_rotation=90, link_color_func=_black_color_func
@@ -332,37 +356,76 @@ def _get_subplots(
     height_ratios: tuple[float, float] | None = (0.07, 1),
     wspace: float = 0.1,
     hspace: float = 0.01,
+    orientation: str = "vertical",
 ) -> tuple[plt.Figure, list[list[plt.Axes]]]:
     """A helper function to get matplotlib figure and axes for plotting stacked bar plot
     or heatmap with multiple panels.
     """
+    if orientation == "horizontal":
+        fig_size = fig_size[::-1]
+        height_ratios = height_ratios[::-1]
+        wspace, hspace = hspace, wspace
+        width_ratios, height_ratios = height_ratios, width_ratios
+
     if height_ratios is None:  # no hierarchical clustering
-        fig, axs = plt.subplots(
-            1,
-            num_cols,
-            sharey="row",
-            figsize=fig_size,
-            width_ratios=width_ratios,
-        )
+        if orientation == "vertical":
+            fig, axs = plt.subplots(
+                1,
+                num_cols,
+                sharey="row",
+                figsize=fig_size,
+                width_ratios=width_ratios,
+            )
+        elif orientation == "horizontal":
+            fig, axs = plt.subplots(
+                num_cols,
+                1,
+                sharex="col",
+                figsize=fig_size,
+                height_ratios=height_ratios,
+            )
+        else:
+            raise ValueError("Unknown orientation.")
         if num_cols == 1:
             axs = [axs]
         axs = [[None] * num_cols, axs]
-        fig.subplots_adjust(wspace=wspace)
+        fig.subplots_adjust(wspace=wspace, hspace=hspace)
     else:
-        if not len(height_ratios) == 2:
-            raise ValueError("height_ratios should be a list of length 2.")
-        fig, axs = plt.subplots(
-            2,
-            num_cols,
-            figsize=fig_size,
-            width_ratios=width_ratios,
-            height_ratios=height_ratios,
-        )
+        if orientation == "vertical":
+            if not len(height_ratios) == 2:
+                raise ValueError("height_ratios should be a list of length 2.")
+            fig, axs = plt.subplots(
+                2,
+                num_cols,
+                figsize=fig_size,
+                width_ratios=width_ratios,
+                height_ratios=height_ratios,
+            )
+        elif orientation == "horizontal":
+            if not len(width_ratios) == 2:
+                raise ValueError("width_ratios should be a list of length 2.")
+            fig, axs = plt.subplots(
+                num_cols,
+                2,
+                figsize=fig_size,
+                width_ratios=width_ratios,
+                height_ratios=height_ratios,
+            )
+            axs = axs.T
+        else:
+            raise ValueError("Unknown orientation.")
         if num_cols == 1:
             axs = [[axs[0]], [axs[1]]]
         # share y for the heatmap, i.e., the second row
-        for i in range(1, num_cols):
-            axs[1, i].sharey(axs[1, 0])
+        if orientation == "vertical":
+            for i in range(1, num_cols):
+                axs[1, i].sharey(axs[1, 0])
+        elif orientation == "horizontal":
+            axs = axs[::-1]
+            for i in range(1, num_cols):
+                axs[1, i].sharex(axs[0, 1])
+        else:
+            raise ValueError("Unknown orientation.")
         fig.subplots_adjust(wspace=wspace, hspace=hspace)
     return fig, axs
 
@@ -439,7 +502,7 @@ if __name__ == "__main__":
     parser_ab.add_argument("-f", "--fig_dir", type=str, required=True)
     parser_ab.add_argument("-r", "--rep_group_key", type=str, default="rep_group")
     parser_ab.add_argument("-s", "--sample_group_key", type=str, default="sample_group")
-    parser_ab.add_argument("-sp", "--spikein_taxa_key", type=str, default="spike_in")
+    parser_ab.add_argument("-sp", "--spikein_taxa_key", type=str, default=None)
     parser_ab.add_argument(
         "-l", "--tax_levels", nargs="+", default=["order", "family", "genus", "otu"]
     )
@@ -452,6 +515,13 @@ if __name__ == "__main__":
         help="Genus relative abundance threshold.",
     )
     parser_ab.add_argument(
+        "-or",
+        "--orientation",
+        type=str,
+        choices=["vertical", "horizontal"],
+        default="vertical",
+    )
+    parser_ab.add_argument(
         "-sc",
         "--sample_hierarchical_clustering",
         action="store_true",
@@ -462,7 +532,7 @@ if __name__ == "__main__":
     )
     parser_ab.add_argument(
         "-fc",
-        "--feature_hierarchy_clustering",
+        "--feature_hierarchical_clustering",
         action="store_true",
         default=False,
         help="Perform hierarchical clustering on features in each group, order them "
@@ -515,8 +585,9 @@ if __name__ == "__main__":
     if args.command == "abundance_group":
         rel_ab_thresholds = args.rel_ab_thresholds
         plot_type = args.plot_type
+        orientation = args.orientation
         sample_hierarchical_clustering = args.sample_hierarchical_clustering
-        feature_hierarchy_clustering = args.feature_hierarchy_clustering
+        feature_hierarchical_clustering = args.feature_hierarchical_clustering
 
         # process into relative abundance and aggregate at replication group level
         df_otu_rel_ab_g = _agg_along_axis(
@@ -557,13 +628,20 @@ if __name__ == "__main__":
                     + sns.color_palette("tab20b", 20)
                     + sns.color_palette("tab20c", 20)
                 )
-                fig, axs = _get_subplots(num_cols, fig_size, ratio, height_ratios=None)
+                fig, axs = _get_subplots(
+                    num_cols,
+                    fig_size,
+                    ratio,
+                    height_ratios=(0.2, 1),
+                    orientation=orientation,
+                )
                 _stacked_bar(
                     res_group_list,
                     names,
                     f"Taxonomy at {level if level != 'otu' else level.upper()} level",
                     custom_palette,
                     axs,
+                    orientation=orientation,
                 )
                 fig.savefig(
                     f"{fig_dir}/rel_ab_group_{level}_sb.png",
@@ -601,7 +679,7 @@ if __name__ == "__main__":
                         for res_group in res_group_list
                     ]
                     df = pd.concat(dfs, axis=1)
-                    if feature_hierarchy_clustering:
+                    if feature_hierarchical_clustering:
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )
@@ -645,7 +723,7 @@ if __name__ == "__main__":
                         )
                     dfs = ([res_group.T for res_group in res_group_list],)
                     df = pd.concat(dfs, axis=1)
-                    if feature_hierarchy_clustering:
+                    if feature_hierarchical_clustering:
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )
@@ -679,7 +757,7 @@ if __name__ == "__main__":
                         dpi=300,
                     )
                 if plot_type in ["heatmap_binary"]:
-                    size = size[0], size[1] / 2
+                    # size = size[0], size[1] / 2
                     if sample_hierarchical_clustering:
                         fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
                         axs_heatmap, axs_dend = axs
@@ -693,7 +771,7 @@ if __name__ == "__main__":
                         (res_group > 0).astype(int).T for res_group in res_group_list
                     ]
                     df = pd.concat(dfs, axis=1)
-                    if feature_hierarchy_clustering:
+                    if feature_hierarchical_clustering:
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )

@@ -1,6 +1,6 @@
 
-set amplicon_type 16S
-set working_dir /mnt/c/aws_data/20240224_logan_tyndall_boneyard_interaction/16s
+set amplicon_type ITS
+set working_dir /mnt/c/aws_data/20240224_logan_tyndall_boneyard_interaction/its
 set metadata_file metadata/batch_1_2.tsv
 if test $amplicon_type = 16S
     set rdp_db 16srrna

@@ -288,7 +288,7 @@ def read_tables(
                     "WARNING: The following samples are missing from OTU count table:"
                 )
                 print("\t", end="")
-                print(*sorted(missing_samples), sep="\n\t")
+                print(", ".join(sorted(missing_samples)))
                 print("Filling in missing samples with all zero counts.")
             df_otu_count = pd.concat(
                 [

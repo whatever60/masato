@@ -24,16 +24,26 @@ def run_mafft(input_fasta: str):
     return subprocess.run(mafft_cmd, capture_output=True, text=True)
 
 
-def run_trimal(input_aln: str, output_phy: str):
+def run_trimal(input_aln: str, output_phy: str, tree_method: str = "raxml"):
     # trimal command
-    trimal_cmd = [
-        f"{os.path.dirname(sys.executable)}/trimal",
-        "-in",
-        input_aln,
-        "-phylip",
-        "-out",
-        output_phy,
-    ]
+    if tree_method == "raxml":
+        trimal_cmd = [
+            f"{os.path.dirname(sys.executable)}/trimal",
+            "-in",
+            input_aln,
+            "-phylip",
+            "-out",
+            output_phy,
+        ]
+    else:
+        # output fasta
+        trimal_cmd = [
+            f"{os.path.dirname(sys.executable)}/trimal",
+            "-in",
+            input_aln,
+            "-out",
+            output_phy,
+        ]
     return subprocess.run(trimal_cmd, capture_output=True, text=True)
 
 
@@ -64,11 +74,28 @@ def run_raxml(alignment_file: str, output_dir: str):
     return subprocess.run(raxml_cmd, capture_output=True, text=True, cwd=".")
 
 
+def run_fasttree(alignment_file: str, output_tree: str):
+    """Run FastTre on nucleotide alignment file and save the tree by taking input from 
+    stdin and redirecting stdout to a file.
+    """
+    # FastTree command
+    fasttree_cmd = [
+        f"{os.path.dirname(sys.executable)}/FastTree",
+        "-nt",
+        "-gtr",
+    ]
+    print(f"Running FastTree with command: {' '.join(fasttree_cmd)}")
+    # return subprocess.run(fasttree_cmd, capture_output=True, text=True, cwd=".")
+    with open(alignment_file, "r") as aln, open(output_tree, "w") as tree:
+        return subprocess.run(fasttree_cmd, stdin=aln, stdout=tree, text=True, cwd=".")
+
+
 def process_sequences(
     zotu_fasta_path: str,
     alignment_out: str,
     tree_out: str,
     seq_names: list[str] = None,
+    tree_method: str = "raxml",
 ) -> int:
     if seq_names is None:
         input_fasta = zotu_fasta_path
@@ -95,7 +122,7 @@ def process_sequences(
     temp_aln.write(mafft_result.stdout)
 
     # Run trimal on the alignment file and check if it ran successfully
-    trimal_result = run_trimal(temp_aln.name, alignment_out)
+    trimal_result = run_trimal(temp_aln.name, alignment_out, tree_method)
     temp_aln.close()
     if trimal_result.returncode != 0:
         print("Error in running trimal:", trimal_result.stderr)
@@ -106,21 +133,33 @@ def process_sequences(
             alignment_out,
         )
 
-    # Run RAxML, output to a temporary directory, copy the tree file to the output path
-    with tempfile.TemporaryDirectory() as temp_dir:
-        raxml_result = run_raxml(alignment_out, temp_dir)
-        tree_file = os.path.join(temp_dir, "RAxML_bestTree.whatever")
-        shutil.copy(tree_file, tree_out)
+    if tree_method == "raxml":
+        # Run RAxML, output to a temporary directory, copy the tree file to the output path
+        with tempfile.TemporaryDirectory() as temp_dir:
+            raxml_result = run_raxml(alignment_out, temp_dir)
+            tree_file = os.path.join(temp_dir, "RAxML_bestTree.whatever")
+        # Check if RAxML ran successfully
+        if raxml_result.returncode != 0:
+            print("Error in running RAxML:", raxml_result.stderr)
+            return 1
+        else:
+            print("RAxML completed successfully. Tree saved in Newick format as:", tree_out)
+            shutil.copy(tree_file, tree_out)
+    elif tree_method == "fasttree":
+        fasttree_result = run_fasttree(alignment_out, tree_out)
+        if fasttree_result.returncode != 0:
+            print("Error in running FastTree:", fasttree_result.stderr)
+            return 1
+        else:
+            print(
+                "FastTree completed successfully. Tree saved in Newick format as:",
+                tree_out,
+            )
+    else:
+        raise ValueError("Invalid tree method:", tree_method)
 
     if seq_names is not None:
         temp_fasta.close()
-
-    # Check if RAxML ran successfully
-    if raxml_result.returncode != 0:
-        print("Error in running RAxML:", raxml_result.stderr)
-        return 1
-    else:
-        print("RAxML completed successfully. Tree saved in Newick format as:", tree_out)
 
     return 0
 
@@ -137,6 +176,15 @@ if __name__ == "__main__":
         type=str,
         metavar="FASTA",
     )
+    parser.add_argument(
+        "-m",
+        "--tree_method",
+        help="Method to generate the tree",
+        required=False,
+        type=str,
+        default="fasttree",
+        choices=["raxml", "fasttree"],
+    )
     args = parser.parse_args()
 
     # Read the sequence names file
@@ -147,9 +195,9 @@ if __name__ == "__main__":
         os.path.dirname(args.input_fasta),
         os.path.basename(args.input_fasta).split(".")[0],
     )
-    aln_file = prefix + ".phy"
+    aln_file = prefix + (".phy" if args.tree_method == "raxml" else ".fasta")
     tree_file = prefix + ".newick"
-    process_sequences(args.input_fasta, aln_file, tree_file)
+    process_sequences(args.input_fasta, aln_file, tree_file, tree_method="fasttree")
 
     # Read the tree file and print the tree
     # tree = Phylo.read(args.output, "newick")
