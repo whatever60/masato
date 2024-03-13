@@ -242,11 +242,11 @@ def cat_fastq_se(
     else:
         rename_read = _rename_read_illumina
 
-    for file_ in tqdm(files):
+    for file_, sample_name, read_type in tqdm(files):
         # match = PATTERN_ILLUMINA.search(os.path.basename(file_))
         # if match:
         # sample_name = match.group(1)
-        sample_name = os.path.basename(file_).split(".")[0].split("_")[0]
+        # sample_name = os.path.basename(file_).split(".")[0].split("_")[0]
         if samples_in_meta is not None and sample_name not in samples_in_meta:
             continue
         if _remove_undet and sample_name == "Undetermined":

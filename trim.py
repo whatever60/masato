@@ -279,6 +279,10 @@ def get_primer_set(name: str) -> tuple[str, str]:
             f"{PRIMER_16S_5}...{get_rc(PRIMER_16S_7)}",
             f"{PRIMER_16S_7}...{get_rc(PRIMER_16S_5)}",
         )
+    elif name == "its_3":
+        return get_rc(PRIMER_ITS_7), get_rc(PRIMER_ITS_5)
+    elif name == "16s_3":
+        return get_rc(PRIMER_16S_7), get_rc(PRIMER_16S_5)
     # elif name == "maps_0":
     #     # optional
     #     return f"{PRIMER_MAPS_0}...{get_rc(PRIMER_MAPS_r)}", None
@@ -302,6 +306,8 @@ def isolate_150_preprocess(
     rename_pattern: str,
     output_fastq: str,
     primer_set: str,
+    first_k: int = None,
+    min_length: int = 100,
 ) -> None:
     output_dir, output_f = os.path.split(output_fastq)
     output_dir_demux = os.path.join(output_dir, "demux")
@@ -315,23 +321,24 @@ def isolate_150_preprocess(
     os.makedirs(output_dir_cutadapt, exist_ok=True)
 
     # demultiplex with cutadapt
+    proc_args = [
+        "cutadapt",
+        "-e",
+        "0.15",
+        "--no-indels",
+        "-g",
+        f"^file:{barcode_fwd_fasta}",
+        "-G",
+        f"^file:{barcode_rev_fasta}",
+        "-o",
+        os.path.join(output_dir_demux, "{name1}-{name2}_R1.fq.gz"),
+        "-p",
+        os.path.join(output_dir_demux, "{name1}-{name2}_R2.fq.gz"),
+        "--interleaved",
+        "-",
+    ]
     cutadapt_demux_proc = subprocess.Popen(
-        [
-            "cutadapt",
-            "-e",
-            "0.15",
-            "--no-indels",
-            "-g",
-            f"^file:{barcode_fwd_fasta}",
-            "-G",
-            f"^file:{barcode_rev_fasta}",
-            "-o",
-            os.path.join(output_dir_demux, "{name1}-{name2}_R1.fq.gz"),
-            "-p",
-            os.path.join(output_dir_demux, "{name1}-{name2}_R2.fq.gz"),
-            "--interleaved",
-            "-",
-        ],
+        proc_args,
         stdin=subprocess.PIPE,
         # silence cutadapt's output
         stdout=subprocess.DEVNULL,
@@ -365,34 +372,37 @@ def isolate_150_preprocess(
 
     # trim with cutadapt
     a, A = get_primer_set(primer_set)
+    proc_args = [
+        "cutadapt",
+        "-a",
+        a,
+        "-A",
+        A,
+        "--minimum-length",
+        str(min_length),
+        "--pair-filter",
+        "first",
+        "-o",
+        os.path.join(output_dir_cutadapt, output_fastq_r1),
+        "-p",
+        os.path.join(output_dir_cutadapt, output_fastq_r2),
+        "--untrimmed-output",
+        os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
+        "--untrimmed-paired-output",
+        os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
+        "--too-short-output",
+        os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
+        "--too-short-paired-output",
+        os.path.join(output_dir_cutadapt, "too_short_2.fq.gz"),
+        "--cores",
+        "4",
+        "--interleaved",
+        "-",
+    ]
+    if first_k is not None:
+        proc_args.extend(["-l", str(first_k)])
     cutadapt_trim_proc = subprocess.Popen(
-        [
-            "cutadapt",
-            "-a",
-            a,
-            "-A",
-            A,
-            "--minimum-length",
-            "100",
-            "--pair-filter",
-            "first",
-            "-o",
-            os.path.join(output_dir_cutadapt, output_fastq_r1),
-            "-p",
-            os.path.join(output_dir_cutadapt, output_fastq_r2),
-            "--untrimmed-output",
-            os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
-            "--untrimmed-paired-output",
-            os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
-            "--too-short-output",
-            os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
-            "--too-short-paired-output",
-            os.path.join(output_dir_cutadapt, "too_short_2.fq.gz"),
-            "--cores",
-            "4",
-            "--interleaved",
-            "-",
-        ],
+        proc_args,
         stdin=subprocess.PIPE,
         # silence cutadapt's output
         stdout=subprocess.DEVNULL,
@@ -535,20 +545,38 @@ def cutadapt_demux_merge_trim_se(
     shutil.rmtree(output_dir_demux)
 
 
-def cutadapt_merge_trim_se(fastq_path: str, output_fastq: str, primer_set: str) -> None:
+def cutadapt_merge_trim_se(
+    fastq_path: str,
+    output_fastq: str,
+    primer_set: str,
+    first_k: int = None,
+    min_length: int = None,
+) -> None:
     output_dir, output_f = os.path.split(output_fastq)
     os.makedirs(output_dir, exist_ok=True)
-    a, _ = get_primer_set(primer_set)
+    a, A = get_primer_set(primer_set)
     proc_args = [
         "cutadapt",
-        # "-a" if "..." in a else "-g",
-        "-g",
+        "-g" if primer_set.endswith("_5") == "fwd" else "-a",
         a,
         "-o",
         output_fastq,
         "--cores",
         "8",
     ]
+    if first_k is not None:
+        proc_args.extend(["-l", str(first_k)])
+    if min_length is not None:
+        output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
+        os.makedirs(output_dir_cutadapt, exist_ok=True)
+        proc_args.extend(
+            [
+                "--minimum-length",
+                str(min_length),
+                "--too-short-output",
+                os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
+            ]
+        )
     if os.path.isdir(fastq_path):
         proc_args.append("-")
         cutadapt_trim_proc = subprocess.Popen(
@@ -715,8 +743,23 @@ if __name__ == "__main__":
         "--mode",
         type=str,
         default="simple",
+        choices=[
+            "simple",
+            "isolate_150",
+            "maps_round0",
+            "maps_round1",
+            "maps_round2",
+            "maps_round3",
+        ],
         help="Processing mode",
     )
+    parser.add_argument(
+        "-k", "--first_k", type=int, default=None, help="The first k bases to keep"
+    )
+    parser.add_argument(
+        "-l", "--min_length", type=int, default=100, help="Minimum length to keep"
+    )
+
     args = parser.parse_args()
 
     if args.mode == "simple":
@@ -729,6 +772,8 @@ if __name__ == "__main__":
             args.pattern,
             args.output,
             primer_set=args.primer_set,
+            first_k=args.first_k,
+            min_length=args.min_length,
         )
     elif args.mode == "maps_round0":
         cutadapt_merge_trim_se(
