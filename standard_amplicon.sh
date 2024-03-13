@@ -1,21 +1,22 @@
 
-set amplicon_type ITS
-set working_dir /mnt/c/aws_data/20240224_logan_tyndall_boneyard_interaction/its
-set metadata_file metadata/batch_1_2.tsv
-if test $amplicon_type = 16S
+set amplicon_type 16s
+set working_dir /mnt/c/aws_data/20240306_arl_boneyard_bulk_isolate_i
+set fastq_dir fastq
+set output_unoise3_dir output_unoise3_$amplicon_type
+set metadata_file metadata/bulk.tsv
+if test $amplicon_type = 16s
     set rdp_db 16srrna
     set prefix 16S-ZOTU
     set unknown_name 16S-ZOTU_UNKNOWN
     set level genus 
 else
     set rdp_db fungalits_unite
+    set rdp_db fungalits_unite_v9
     set prefix ITS-ZOTU
     set level genus species
     set unknown_name ITS-ZOTU_UNKNOWN
 end
 
-set fastq_dir fastq
-set output_unoise3_dir output_unoise3
 set fig_dir figs
 
 # ./trim.py --mode simple -i $working_dir/$fastq_dir -o $working_dir/$output_unoise3_dir/merged.fq.gz
