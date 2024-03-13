@@ -48,7 +48,10 @@ def read_isolate_metadata_rich(
         .astype(float)
         .to_numpy()
     )
-    return isolate_metadata.sort_values(["src_plate", "sample"]).set_index("sample")
+    isolate_metadata["spike_in"] = None
+    return isolate_metadata.sort_values(
+        ["sample_type", "medium_type", "src_plate", "sample"]
+    ).set_index("sample")
 
 
 def get_top_cols(
@@ -253,8 +256,54 @@ def combine_count(
             # ].copy()
             dfs_zotu_c.append(df_zotu_c)
             dfs_taxonomy.append(df_taxonomy)
+        else:
+            dfs_zotu_c.append(None)
+            dfs_taxonomy.append(None)
 
     return dfs_zotu_c, dfs_taxonomy
+
+
+def quality_control(
+    df_purity: list[pd.DataFrame] | pd.DataFrame,
+    purity_cutoff: float,
+    total_counts_cutoff: int,
+) -> pd.DataFrame:
+    """Get the ZOTU count table for pure isolates in an isolate sequencing experiment.
+
+    If df_purity is a list, we assume the dataframes have the same index, and a row
+        is considered pure if it is pure in any dataframes.
+    """
+    if isinstance(df_purity, list):
+        df_purity = pd.concat(df_purity[["top_1", "top_1_val", "total_counts"]], axis=1)
+    else:
+        df_purity = df_purity[["top_1", "top_1_val", "total_counts"]]
+    df_purity = df_purity.iloc[
+        pd.concat(
+            [
+                (df_purity.iloc[:, i + 1] >= purity_cutoff)
+                & (df_purity.iloc[:, i + 2] >= total_counts_cutoff)
+                for i in range(0, df_purity.shape[1], 3)
+            ],
+            axis=1,
+        )
+        .any(axis=1)
+        .tolist()
+    ]
+    top_1 = df_purity[["top_1"]].to_numpy()[
+        np.arange(df_purity.shape[0]),
+        df_purity[["top_1_val"]].to_numpy().argmax(axis=1),
+    ]
+    top_1 = pd.DataFrame(top_1, index=df_purity.index, columns=["#OTU ID"])
+    return (
+        top_1.reset_index(names="well_barcode")
+        .assign(dummy=1)
+        .pivot_table(
+            index="well_barcode",
+            columns="#OTU ID",
+            values="dummy",
+            fill_value=0,
+        )
+    ).astype(int)
 
 
 if __name__ == "__main__":
@@ -308,7 +357,7 @@ if __name__ == "__main__":
         "-cb",
         "--zotu_count_bacteria",
         help="Zotu count bacteria TSV file",
-        required=True,
+        default=None,
         type=str,
         metavar="ZOTU_COUNT_BACTERIA_TSV",
     )
@@ -316,7 +365,7 @@ if __name__ == "__main__":
         "-cf",
         "--zotu_count_fungi",
         help="Zotu count fungi TSV file",
-        required=True,
+        default=None,
         type=str,
         metavar="ZOTU_COUNT_FUNGI_TSV",
     )
@@ -343,6 +392,20 @@ if __name__ == "__main__":
         default=[],
         type=str,
         nargs="+",
+    )
+    parser_combine.add_argument(
+        "-cp",
+        "--purity_cutoff",
+        help="Purity cutoff",
+        default=0.8,
+        type=float,
+    )
+    parser_combine.add_argument(
+        "-ct",
+        "--total_counts_cutoff",
+        help="Total counts cutoff",
+        default=10,
+        type=int,
     )
     parser_combine.add_argument(
         "-o",
@@ -383,16 +446,46 @@ if __name__ == "__main__":
                         os.path.join(args.output_dir, f"purity_{l}_bacteria.tsv"),
                         sep="\t",
                     )
+                    otu_count_pure_b = quality_control(
+                        df_purity_bacteria, args.purity_cutoff, args.total_counts_cutoff
+                    )
+                    otu_count_pure_b.transpose().to_csv(
+                        os.path.join(args.output_dir, f"count_{l}_bacteria_only.tsv"),
+                        sep="\t",
+                    )
                 if df_purity_fungi is not None:
                     df_purity_fungi.to_csv(
                         os.path.join(args.output_dir, f"purity_{l}_fungi.tsv"), sep="\t"
+                    )
+                    otu_count_pure_f = quality_control(
+                        df_purity_fungi, args.purity_cutoff, args.total_counts_cutoff
+                    )
+                    otu_count_pure_f.transpose().to_csv(
+                        os.path.join(args.output_dir, f"count_{l}_fungi_only.tsv"),
+                        sep="\t",
                     )
                 if df_purity is not None:
                     df_purity.to_csv(
                         os.path.join(args.output_dir, f"purity_{l}.tsv"), sep="\t"
                     )
+                    otu_count_pure = quality_control(
+                        df_purity, args.purity_cutoff, args.total_counts_cutoff
+                    )
+                    otu_count_pure.iloc[
+                        :, otu_count_pure.columns.isin(df_purity_bacteria.top_1)
+                    ].transpose().to_csv(
+                        os.path.join(args.output_dir, f"count_{l}_bacteria.tsv"),
+                        sep="\t",
+                    )
+                    otu_count_pure.iloc[
+                        :, otu_count_pure.columns.isin(df_purity_fungi.top_1)
+                    ].transpose().to_csv(
+                        os.path.join(args.output_dir, f"count_{l}_fungi.tsv"),
+                        sep="\t",
+                    )
         else:
-            df_zotu_count = pd.concat(dfs_count, axis=1).fillna(0)
+            df_zotu_count = pd.concat(dfs_count, axis=1).fillna(0).transpose()
+            df_zotu_count.index.name = "#OTU ID"
             df_taxonomy = pd.concat(dfs_taxon, axis=0)
             df_zotu_count.to_csv(os.path.join(args.output_dir, "count.tsv"), sep="\t")
             df_taxonomy.to_csv(os.path.join(args.output_dir, "taxonomy.tsv"), sep="\t")
