@@ -129,10 +129,23 @@ def _calc_norm_factor(
 #     )
 
 
-def _agg_along_axis(df: pd.DataFrame, series: pd.Series, axis: int) -> pd.DataFrame:
+def _agg_along_axis(
+    df: pd.DataFrame, series: pd.Series, axis: int, aggfunc: str = None
+) -> pd.DataFrame:
     index_name = df.index.name
     series_index_name = series.index.name
     df = pl.from_pandas(df.reset_index().rename(columns={"index": "row"}))
+    exprs = [pl.col("rel_ab").mean(), pl.col("rel_ab").sum()]
+
+    if not aggfunc:
+        expr = exprs[axis]
+    elif aggfunc == "sum":
+        expr = exprs[1]
+    elif aggfunc == "mean":
+        expr = exprs[0]
+    else:
+        raise ValueError("expr must be either 'mean' or 'sum'.")
+
     if axis == 0:
         series = pl.from_pandas(
             series.reset_index(name="group").rename(columns={series_index_name: "row"})
@@ -141,7 +154,7 @@ def _agg_along_axis(df: pd.DataFrame, series: pd.Series, axis: int) -> pd.DataFr
             df.melt(id_vars="row", variable_name="col", value_name="rel_ab")
             .join(series, on="row")
             .group_by(["col", "group"])
-            .agg(rel_ab=pl.col("rel_ab").mean())
+            .agg(rel_ab=expr)
             .pivot(
                 index="group",
                 columns="col",
@@ -158,7 +171,7 @@ def _agg_along_axis(df: pd.DataFrame, series: pd.Series, axis: int) -> pd.DataFr
             df.melt(id_vars="row", variable_name="col", value_name="rel_ab")
             .join(series, on="col")
             .group_by(["row", "group"])
-            .agg(rel_ab=pl.col("rel_ab").sum())
+            .agg(rel_ab=expr)
             .pivot(
                 index="group",
                 columns="row",
@@ -223,7 +236,8 @@ def _taxa_qc(
         df_tax_rel_ab = df_tax_rel_ab[
             df_tax_rel_ab.columns[~df_tax_rel_ab.columns.str.endswith("unknown")]
         ]
-        df_tax_rel_ab = df_tax_rel_ab.div(df_tax_rel_ab.sum(axis=1), axis=0).fillna(0)
+        if (df_tax_rel_ab.dtypes != "int").any():
+            df_tax_rel_ab = df_tax_rel_ab.div(df_tax_rel_ab.sum(1), 0).fillna(0)
     return df_tax_rel_ab
 
 
