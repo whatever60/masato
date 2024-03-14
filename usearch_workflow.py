@@ -659,6 +659,9 @@ def search_global(
     # intermediate_fasta = os.path.join(output_dir, "_temp.fa.gz")
     # _fq2fa(input_fastq, intermediate_fasta)
 
+    # https://github.com/torognes/vsearch/issues/552
+    # https://github.com/torognes/vsearch/issues/467
+    # https://github.com/torognes/vsearch/issues/392
     subprocess.run(
         [
             "vsearch",
@@ -1054,7 +1057,7 @@ def main():
         default=None,
     )
     search_global_parser.add_argument(
-        "--id", type=float, default=0.9, help="Minimum cluster identity"
+        "--id", type=float, default=0.97, help="Minimum cluster identity"
     )
     search_global_parser.add_argument(
         "--unknown_name",
