@@ -19,30 +19,31 @@ def get_coords(
     attributes = node.attributes
     x = attributes.get("x")
     y = attributes.get("y")
+    plot = 1
     if not overwrite and x is not None and y is not None:
         return x, y
-
-    x = max_x - node.distance_from_root()
-
-    if node.is_leaf():
-        if y is None:
-            raise ValueError(
-                f"Leaf node {node} has no y value. Set leaf y value first."
+    if x is None or overwrite:
+        x = max_x - node.distance_from_root()
+    if y is None or overwrite:
+        if node.is_leaf():
+            if y is None:
+                raise ValueError(
+                    f"Leaf node {node} has no y value. Set leaf y value first."
+                )
+        elif node.num_child_nodes() == 0:
+            y = -999
+            plot = 0
+        else:
+            y = (
+                sum(
+                    [
+                        get_coords(child, max_x=max_x, overwrite=overwrite)[1]
+                        for child in node.child_node_iter()
+                    ]
+                )
+                / node.num_child_nodes()
             )
-    elif node.num_child_nodes() == 0:
-        y = -999
-        attributes["plot"] = 0
-    else:
-        y = (
-            sum(
-                [
-                    get_coords(child, max_x=max_x, overwrite=overwrite)[1]
-                    for child in node.child_node_iter()
-                ]
-            )
-            / node.num_child_nodes()
-        )
-    attributes.update({"x": x, "y": y, "plot": 1})
+    attributes.update({"x": x, "y": y, "plot": plot})
     return x, y
 
 
@@ -85,7 +86,7 @@ def get_taxonomy_tree(
             path=os.path.join(temp_dir, "whatever_taxonomy_tree.newick"),
             schema="newick",
             rooting="force-rooted",
-            preserve_underscores=False,
+            preserve_underscores=True,
         ).extract_tree(
             node_filter_fn=lambda n: n.taxon.label in taxon_df.index,
             is_apply_filter_to_leaf_nodes=True,
@@ -112,17 +113,17 @@ def _calc_y(
     stack = [tree.seed_node]
     y = base
     ordered_taxa = []
-    while stack:
+    while stack:  # depth-first search
         node = stack.pop()
         node_name = _get_node_label(node)
         if node_name in taxon_zotu_count:
+            taxon2y[node_name] = y
+            taxon_count_now[node_name] = 0
+            node.attributes = {"y": y}
+            y += 1
             ordered_taxa.append(node_name)
         if node.is_leaf():
             node_taxon = zotu2taxon[node_name]
-            if node_taxon not in taxon2y:
-                taxon2y[node_taxon] = y
-                taxon_count_now[node_taxon] = 0
-                y += 1
             node.attributes = {
                 "y": taxon2y[node_taxon]
                 + taxon2ys[node_taxon][taxon_count_now[node_taxon]]
@@ -163,14 +164,11 @@ def get_taxon2marker(
 ) -> dict[str, str]:
     # hexagon for domain, pentagon for phylum, square for class, triangle for order, star for family, circle for genus
     markers = "*hps^o"
+    levels = ["domain", "phylum", "class", "order", "family", "genus"]
     if levels_of_interest is None:
-        markers = markers
-        levels = ["domain", "phylum", "class", "order", "family", "genus"]
-    else:
-        levels = levels_of_interest
-        markers = markers[: len(levels)]
-    level2marker = {l: m for l, m in zip(levels, markers)}
-    level2marker["species"] = None
+        levels_of_interest = levels
+    level2marker = {l: m for l, m in zip(levels, markers) if l in levels_of_interest}
+    level2marker["species"] = None  # no marker for species, but do add it to the dict
     res = {}
     for level, marker in level2marker.items():
         for taxon in taxon_df[level].unique():
@@ -187,7 +185,8 @@ def plot_tree(
     ax: plt.Axes,
     color_propagate: bool = False,
     annotate: bool = False,
-    nodes_to_drop: list[str] = tuple(),
+    nodes_to_drop: set[str] = set(),
+    terminal_nodes=None,
 ) -> None:
     """Plot dendrogram with matplotlib.
     Plotting starts from root to leaf, and each iteration draws a horizontal line from parent
@@ -196,15 +195,16 @@ def plot_tree(
         each child has the same x coordinate, otherwise the tree is ill-formed.
     """
     node_label2color = dict(node_label2color)
+    # terminal_nodes = set(terminal_nodes)
     # nodes_to_plot = queue.Queue()
     # nodes_to_plot.put(tree.seed_node)
     # while not nodes_to_plot.empty():
-        # node = nodes_to_plot.get()
+    # node = nodes_to_plot.get()
     nodes_to_plot = [tree.seed_node]
     while nodes_to_plot:
         node = nodes_to_plot.pop()
         node_name = _get_node_label(node)
-        if not node.attributes.get("plot"):
+        if not node.attributes.get("plot") or node_name in terminal_nodes:
             continue
         x, y = get_coords(node, max_x=None)
 
@@ -224,16 +224,18 @@ def plot_tree(
         # x coord of child nodes
 
         color = node_label2color.get(node_name, "k")
-        if node.num_child_nodes():
+        child_nodes = np.array(node.child_nodes(), dtype=object)
+
+        if len(child_nodes):
             child_coords = np.array(
                 [
                     get_coords(child, max_x=None)
-                    for child in node.child_node_iter()
+                    for child in child_nodes
                     if child.attributes.get("plot")
                 ]
             )
             order = child_coords[:, 1].argsort()
-            child_nodes = np.array(node.child_nodes(), dtype=object)[order]
+            child_nodes = child_nodes[order]
             child_coords = child_coords[order]
 
             if len(child_coords) > 1:
@@ -245,8 +247,16 @@ def plot_tree(
                     )
             for i, (node_child, (xc, yc)) in enumerate(zip(child_nodes, child_coords)):
                 child_name = _get_node_label(node_child)
-                if not node_child.attributes.get("plot") or child_name in nodes_to_drop:
+                if child_name in nodes_to_drop:
                     continue
+                # if yc > y or len(child_coords) == 1:
+                #     yt = max(y, child_coords[i - 1, 1]) if i > 0 else y
+                # else:
+                #     yt = (
+                #         min(y, child_coords[i + 1, 1])
+                #         if i < len(child_coords) - 1
+                #         else y
+                #     )
                 yt = (
                     max(y, child_coords[i - 1, 1])
                     if yc > y or len(child_coords) == 1
@@ -263,8 +273,6 @@ def plot_tree(
                     solid_capstyle="round",
                     solid_joinstyle="round",
                 )
-                # if node_name == "unknown":
-                #     import pdb; pdb.set_trace()
                 if color_propagate and (
                     not node_label2color.get(child_name)
                     or not node_label2marker.get(child_name)
