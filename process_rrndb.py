@@ -44,8 +44,13 @@ def parse_taxonomy_line(row):
     }
 
     # Populate the result dictionary with the provided data
+    taxon_names = set()
     for tax, rank, prob in zip(entries, entries, entries):
         if rank in tax_mapping:
+            if tax != "unknwon" and tax in taxon_names:
+                tax += rank[0]
+            tax = tax.replace(" ", "_")
+            taxon_names.add(tax)
             result[tax_mapping[rank]] = tax
             result[tax_mapping[rank] + "_p"] = float(prob)
 
