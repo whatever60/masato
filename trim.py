@@ -8,7 +8,7 @@ import argparse
 
 from Bio.Seq import Seq
 
-from utils import cat_fastq, cat_fastq_se, smart_open
+from utils import cat_fastq, cat_fastq_se, smart_open, print_command
 
 
 def get_rc(seq: str) -> str:
@@ -271,13 +271,13 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
 def get_primer_set(name: str) -> tuple[str, str]:
     if name == "its":
         return (
-            f"{PRIMER_ITS_5}...{get_rc(PRIMER_ITS_7)}",
-            f"{PRIMER_ITS_7}...{get_rc(PRIMER_ITS_5)}",
+            f"^{PRIMER_ITS_5};required...{get_rc(PRIMER_ITS_7)};optional",
+            f"^{PRIMER_ITS_7};required...{get_rc(PRIMER_ITS_5)};optional",
         )
     elif name == "16s":
         return (
-            f"{PRIMER_16S_5}...{get_rc(PRIMER_16S_7)}",
-            f"{PRIMER_16S_7}...{get_rc(PRIMER_16S_5)}",
+            f"{PRIMER_16S_5};required...{get_rc(PRIMER_16S_7)};optional",
+            f"{PRIMER_16S_7};required...{get_rc(PRIMER_16S_5)};optional",
         )
     elif name == "its_3":
         return get_rc(PRIMER_ITS_7), get_rc(PRIMER_ITS_5)
@@ -334,9 +334,12 @@ def isolate_150_preprocess(
         os.path.join(output_dir_demux, "{name1}-{name2}_R1.fq.gz"),
         "-p",
         os.path.join(output_dir_demux, "{name1}-{name2}_R2.fq.gz"),
+        "--cores",
+        "2",
         "--interleaved",
         "-",
     ]
+    print_command(proc_args)
     cutadapt_demux_proc = subprocess.Popen(
         proc_args,
         stdin=subprocess.PIPE,
@@ -374,6 +377,8 @@ def isolate_150_preprocess(
     a, A = get_primer_set(primer_set)
     proc_args = [
         "cutadapt",
+        "-e",
+        "0.15",
         "-a",
         a,
         "-A",
@@ -381,7 +386,9 @@ def isolate_150_preprocess(
         "--minimum-length",
         str(min_length),
         "--pair-filter",
-        "first",
+        "any",
+        "-O",
+        "16",
         "-o",
         os.path.join(output_dir_cutadapt, output_fastq_r1),
         "-p",
@@ -401,6 +408,7 @@ def isolate_150_preprocess(
     ]
     if first_k is not None:
         proc_args.extend(["-l", str(first_k)])
+    print_command(proc_args)
     cutadapt_trim_proc = subprocess.Popen(
         proc_args,
         stdin=subprocess.PIPE,
@@ -745,6 +753,7 @@ if __name__ == "__main__":
         default="simple",
         choices=[
             "simple",
+            "r1",
             "isolate_150",
             "maps_round0",
             "maps_round1",
@@ -770,6 +779,14 @@ if __name__ == "__main__":
             args.barcode_fwd,
             args.barcode_rev,
             args.pattern,
+            args.output,
+            primer_set=args.primer_set,
+            first_k=args.first_k,
+            min_length=args.min_length,
+        )
+    elif args.mode == "r1":
+        cutadapt_merge_trim_se(
+            args.input_dir,
             args.output,
             primer_set=args.primer_set,
             first_k=args.first_k,
