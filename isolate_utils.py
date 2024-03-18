@@ -79,7 +79,7 @@ def _calc_purity(
         ),
         rel_ab_thres=0,
         keep_rare=True,
-        keep_unknown=False,
+        keep_unknown=True,
     )
     df_purity = get_top_cols(df_rab)
     df_purity["total_counts"] = df_zotu_count.sum(axis=1)
@@ -260,6 +260,16 @@ def combine_count(
             dfs_zotu_c.append(None)
             dfs_taxonomy.append(None)
 
+    # rename ZOTU names by prefixing with 16S- for bacteria and ITS- for fungi
+    if all(df is not None for df in dfs_zotu_c):
+        overlap = set(dfs_zotu_c[0].columns) & set(dfs_zotu_c[1].columns)
+        rename_dict_16s = {x: "16S-" + x for x in overlap}
+        rename_dict_its = {x: "ITS-" + x for x in overlap}
+        dfs_zotu_c[0].rename(columns=rename_dict_16s, inplace=True)
+        dfs_zotu_c[1].rename(columns=rename_dict_its, inplace=True)
+        dfs_taxonomy[0].rename(index=rename_dict_16s, inplace=True)
+        dfs_taxonomy[1].rename(index=rename_dict_its, inplace=True)
+    
     return dfs_zotu_c, dfs_taxonomy
 
 
@@ -426,20 +436,25 @@ if __name__ == "__main__":
             output_tsv, sep="\t"
         )
     elif args.subcommand == "combine_count":
-        dfs_count, dfs_taxon = combine_count(
+        (df_count_b, df_count_f), (df_taxon_b, df_taxon_f) = combine_count(
             args.isolate_meta,
             args.zotu_count_bacteria,
             args.zotu_count_fungi,
             args.taxonomy_bacteria,
             args.taxonomy_fungi,
         )
+        os.makedirs(args.output_dir, exist_ok=True)
         if args.purity_levels:
             for l, (
                 df_purity_bacteria,
                 df_purity_fungi,
                 df_purity,
             ) in get_isolate_purity(
-                *dfs_count, *dfs_taxon, levels=args.purity_levels
+                df_count_b,
+                df_count_f,
+                df_taxon_b,
+                df_taxon_f,
+                levels=args.purity_levels,
             ).items():
                 if df_purity_bacteria is not None:
                     df_purity_bacteria.to_csv(
@@ -448,7 +463,7 @@ if __name__ == "__main__":
                     )
                     otu_count_pure_b = quality_control(
                         df_purity_bacteria, args.purity_cutoff, args.total_counts_cutoff
-                    )
+                    ).reindex(df_count_b.columns, axis=1, fill_value=0)
                     otu_count_pure_b.transpose().to_csv(
                         os.path.join(args.output_dir, f"count_{l}_bacteria_only.tsv"),
                         sep="\t",
@@ -459,7 +474,7 @@ if __name__ == "__main__":
                     )
                     otu_count_pure_f = quality_control(
                         df_purity_fungi, args.purity_cutoff, args.total_counts_cutoff
-                    )
+                    ).reindex(df_count_f.columns, axis=1, fill_value=0)
                     otu_count_pure_f.transpose().to_csv(
                         os.path.join(args.output_dir, f"count_{l}_fungi_only.tsv"),
                         sep="\t",
@@ -471,22 +486,24 @@ if __name__ == "__main__":
                     otu_count_pure = quality_control(
                         df_purity, args.purity_cutoff, args.total_counts_cutoff
                     )
-                    otu_count_pure.iloc[
-                        :, otu_count_pure.columns.isin(df_purity_bacteria.top_1)
-                    ].transpose().to_csv(
+                    otu_count_pure.reindex(
+                        df_count_b.columns, axis=1, fill_value=0
+                    ).transpose().to_csv(
                         os.path.join(args.output_dir, f"count_{l}_bacteria.tsv"),
                         sep="\t",
                     )
-                    otu_count_pure.iloc[
-                        :, otu_count_pure.columns.isin(df_purity_fungi.top_1)
-                    ].transpose().to_csv(
+                    otu_count_pure.reindex(
+                        df_count_f.columns, axis=1, fill_value=0
+                    ).transpose().to_csv(
                         os.path.join(args.output_dir, f"count_{l}_fungi.tsv"),
                         sep="\t",
                     )
         else:
-            df_zotu_count = pd.concat(dfs_count, axis=1).fillna(0).transpose()
+            df_zotu_count = (
+                pd.concat([df_count_b, df_count_f], axis=1).fillna(0).transpose()
+            )
             df_zotu_count.index.name = "#OTU ID"
-            df_taxonomy = pd.concat(dfs_taxon, axis=0)
+            df_taxonomy = pd.concat([df_taxon_b, df_taxon_f], axis=0)
             df_zotu_count.to_csv(os.path.join(args.output_dir, "count.tsv"), sep="\t")
             df_taxonomy.to_csv(os.path.join(args.output_dir, "taxonomy.tsv"), sep="\t")
     else:
