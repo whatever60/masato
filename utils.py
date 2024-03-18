@@ -287,3 +287,18 @@ def _rename_read_concat(
     original_sample = original_header.split("=", 1)[1]
     new_sample = f"{original_sample}_{sample_name}"
     return f"@sample={new_sample} {comment}"
+
+
+def print_command(command: list[str]) -> None:
+    """Print the given command in a readable format.
+    Iterate through the command list and print each element on a new line if starts with
+    a dash, otherwise print it on the same line.
+    """
+    print("Running the command:")
+    print(command[0], end="")
+    for arg in command[1:]:
+        if arg.startswith("-"):
+            print(" \\\n    " + arg, end="")
+        else:
+            print(" " + arg, end="")
+    print()
