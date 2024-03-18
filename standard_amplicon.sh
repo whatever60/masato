@@ -1,5 +1,5 @@
 
-set amplicon_type 16s
+set amplicon_type its
 set working_dir /mnt/c/aws_data/20240306_arl_boneyard_bulk_isolate_i
 set fastq_dir fastq
 set output_unoise3_dir output_unoise3_$amplicon_type
@@ -8,22 +8,23 @@ if test $amplicon_type = 16s
     set rdp_db 16srrna
     set prefix 16S-ZOTU
     set unknown_name 16S-ZOTU_UNKNOWN
-    set level genus 
+    set level genus
+    set fig_dir figs_16s
 else
     set rdp_db fungalits_unite
-    set rdp_db fungalits_unite_v9
+    # set rdp_db fungalits_unite_v9
     set prefix ITS-ZOTU
     set level genus species
     set unknown_name ITS-ZOTU_UNKNOWN
+    set fig_dir figs_its
 end
-
-set fig_dir figs
 
 # ./trim.py --mode simple -i $working_dir/$fastq_dir -o $working_dir/$output_unoise3_dir/merged.fq.gz
 ./usearch_workflow.py unoise3 \
     -i $working_dir/$output_unoise3_dir/merged.fq.gz \
     -o $working_dir/$output_unoise3_dir/unoise3_zotu.fa \
     -l $prefix
+
 ./usearch_workflow.py search_global \
     -i $working_dir/$output_unoise3_dir/merged.fq.gz \
     -d $working_dir/$output_unoise3_dir/unoise3_zotu.fa \
@@ -35,7 +36,29 @@ rdp_classifier \
     -o $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb.tsv \
     -h $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb.hier.tsv
 
-./process_rrndb.py -i $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb.tsv -o  $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_processed.tsv
+./process_rrndb.py \
+    -i $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb.tsv \
+    -o $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_processed.tsv
+
+# with 16S database
+rdp_classifier \
+    $working_dir/$output_unoise3_dir/unoise3_zotu.fa \
+    -d 16srrna \
+    -o $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_16s.tsv \
+    -h $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_16s.hier.tsv
+./process_rrndb.py \
+    -i $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_16s.tsv \
+    -o $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_16s_processed.tsv
+
+# with ITS database
+rdp_classifier \
+    $working_dir/$output_unoise3_dir/unoise3_zotu.fa \
+    -d fungalits_unite_v9 \
+    -o $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_its.tsv \
+    -h $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_its.hier.tsv
+./process_rrndb.py \
+    -i $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_its.tsv \
+    -o $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_its_processed.tsv
 
 ./plot.py abundance_group all \
     -i $working_dir/$output_unoise3_dir/unoise3_zotu.tsv \
