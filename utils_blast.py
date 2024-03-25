@@ -17,7 +17,7 @@ from utils import print_command
 
 
 def blast_online(
-    input__path: str,
+    input_path: str,
     database: str = "nt",
     batch_size: int = 100,
     email: str = "",
@@ -26,14 +26,14 @@ def blast_online(
     Submit BLASTn jobs in batches to NCBI for sequences in a given FASTA file and save the results.
 
     Parameters:
-    - input__path: Path to the input FASTA file containing the sequences to query.
+    - input_path: Path to the input FASTA file containing the sequences to query.
     - database: The NCBI database to search against. Default is 'nt'.
     - output_results_path: Path where the combined BLAST results will be saved.
     - batch_size: The number of sequences to include in one query. Default is 100.
     """
 
     # Read sequences from the FASTA file
-    sequences = list(SeqIO.parse(input__path, "fasta"))
+    sequences = list(SeqIO.parse(input_path, "fasta"))
 
     # Prepare batches using list slicing
     batches = [
@@ -156,7 +156,7 @@ def fetch_taxonomy_ids(
     return taxonomy_ids
 
 
-def blast_local(input__path: str, database: str) -> pd.DataFrame:
+def blast_local(input_path: str, database: str) -> pd.DataFrame:
     """performs blasts and returns the results"""
     # custom_blast_format = '6 qseqid qlen sseqid pident length qstart qend sstart send evalue bitscore slen staxids'
     custom_blast_format = "6 qseqid qlen sseqid pident length qstart qend sstart send evalue bitscore slen staxids"
@@ -166,15 +166,15 @@ def blast_local(input__path: str, database: str) -> pd.DataFrame:
     # temp file
     temp_file = tempfile.NamedTemporaryFile()
     blast_command = [
-        "blastn",
+        "megablast",
         "-query",
-        input__path,
+        input_path,
         "-db",
         database,
         "-num_threads",
         "16",
         "-evalue",
-        "1e-40",
+        "1e-30",
         "-out",
         temp_file.name,
         "-outfmt",
