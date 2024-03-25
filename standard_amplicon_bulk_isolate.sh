@@ -1,9 +1,10 @@
 
-set amplicon_type its
+set amplicon_type 16s
+# set working_dir /mnt/c/aws_data/20240318_arl_boneyard_bulk_isolate_ii
 set working_dir /mnt/c/aws_data/20240315_arl_boneyard_bulk_isolate_i_redo
 set fastq_dir fastq
 set output_unoise3_dir output_unoise3_$amplicon_type
-set metadata_file metadata/bulk.tsv
+set metadata_file metadata/bulk_$amplicon_type.tsv
 set db_16s_local /mnt/c/aws_data/data/blast/db/16s_ribosomal_rna/16S_ribosomal_RNA
 set db_16s_online 16S_ribosomal_RNA
 set db_its_local /mnt/c/aws_data/data/blast/db/its_refseq_fungi/ITS_RefSeq_Fungi
@@ -90,15 +91,80 @@ rdp_classifier \
     -d $working_dir/$output_unoise3_dir/unoise3_zotu.fa \
     --unknown_name $unknown_name
 
-mkdir -p $working_dir/$fig_dir
+./get_tree.py -i $working_dir/$output_unoise3_dir/unoise3_zotu.fa
+
+set data_collection_dir /mnt/c/Users/quym/Dropbox/Hyperspectral_imaging/data_collection
+set data_name 202401_darpa_arcadia_arl_boneyard_b1b2_1
+# set data_name 202401_darpa_arcadia_arl_boneyard_b3b4_1
+
+mkdir -p $working_dir/interaction
+./isolate_utils.py get_metadata \
+    -i $data_collection_dir/camii_pick/$data_name \
+    -pm $data_collection_dir/plate_metadata/$data_name.csv \
+    -o $working_dir/interaction/isolate_metadata.tsv
+
+./isolate_utils.py combine_count \
+    -m $working_dir/interaction/isolate_metadata.tsv \
+    -cb $working_dir/output_unoise3_16s/unoise3_zotu.tsv \
+    -tb $working_dir/output_unoise3_16s/unoise3_zotu_rrndb_processed.tsv \
+    -cf $working_dir/output_unoise3_its/unoise3_zotu.tsv \
+    -tf $working_dir/output_unoise3_its/unoise3_zotu_rrndb_processed.tsv \
+    -o $working_dir/interaction
+
+./isolate_utils.py combine_count \
+    -m $working_dir/interaction/isolate_metadata.tsv \
+    -cb $working_dir/output_unoise3_16s/unoise3_zotu.tsv \
+    -tb $working_dir/output_unoise3_16s/unoise3_zotu_rrndb_processed.tsv \
+    -cf $working_dir/output_unoise3_its/unoise3_zotu.tsv \
+    -tf $working_dir/output_unoise3_its/unoise3_zotu_rrndb_processed.tsv \
+    -o $working_dir/interaction \
+    -pl otu domain \
+    -cp 0.5
+
 ./plot.py abundance_group heatmap_log10 \
     -i $working_dir/$output_unoise3_dir/unoise3_zotu.tsv \
     -m $working_dir/$metadata_file \
     -t $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_processed.tsv \
-    -f $working_dir/$fig_dir/abundance_isolate \
+    -f $working_dir/figs/abundance_isolate_$amplicon_type \
+    -a 0 \
     -l $level \
     -fo taxonomy_tree \
-    -a 0.001 \
     -ii $working_dir/interaction/count_otu_$domain.tsv \
     -im $working_dir/interaction/isolate_metadata.tsv \
-    -ir sample_type
+    -ir sample_type \
+    -isp spike_in_$amplicon_type
+
+./plot.py abundance_group heatmap_log10 \
+    -i $working_dir/$output_unoise3_dir/unoise3_zotu.tsv \
+    -m $working_dir/$metadata_file \
+    -t $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_processed.tsv \
+    -f $working_dir/figs/abundance_isolate_top_$amplicon_type \
+    -a 5 \
+    -l $level \
+    -fo taxonomy_tree \
+    -ii $working_dir/interaction/count_otu_$domain.tsv \
+    -im $working_dir/interaction/isolate_metadata.tsv \
+    -ir sample_type \
+    -isp spike_in_$amplicon_type
+
+
+./plot.py abundance_group heatmap_raw \
+    -i $working_dir/interaction/count_otu_$domain.tsv \
+    -m $working_dir/interaction/isolate_metadata.tsv \
+    -t $working_dir/$output_unoise3_dir/unoise3_zotu_rrndb_processed.tsv \
+    -f $working_dir/figs/isolate_count_$amplicon_type \
+    -l $level \
+    -a 0.01 \
+    -r plate_name \
+    -s sample_group \
+    -sp spike_in_$amplicon_type \
+    -fo taxonomy_tree
+
+# ./plot.py abundance_group heatmap_raw \
+#         -i $working_dir/interaction/count_otu_fungi.tsv \
+#         -m $working_dir/interaction/isolate_metadata.tsv \
+#         -t $working_dir/output_unoise3_its/unoise3_zotu_rrndb_processed.tsv \
+#         -f $working_dir/figs/isolate_count_its \
+#         -l species \
+#         -r plate_name \
+#         -s sample_group

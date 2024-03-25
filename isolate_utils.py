@@ -48,7 +48,8 @@ def read_isolate_metadata_rich(
         .astype(float)
         .to_numpy()
     )
-    isolate_metadata["spike_in"] = None
+    isolate_metadata["spike_in_16s"] = "genus;Sporosarcina,family;Chloroplast"
+    isolate_metadata["spike_in_its"] = None
     return isolate_metadata.sort_values(
         ["sample_type", "medium_type", "src_plate", "sample"]
     ).set_index("sample")

@@ -138,6 +138,8 @@ def _heatmap(
     vmin: float | None = None,
     dfs_iso=None,
 ) -> None:
+    cbar_ax_width = 0.07
+    dend_row_ax_width = 0.2
     if dfs_iso is None:
         dfs_iso = [None] * len(dfs)
     for i, (ax, ax_dend, df, df_iso, name) in enumerate(
@@ -158,12 +160,24 @@ def _heatmap(
 
         if cbar_label is not None and i == len(axs_heatmap) - 1:
             cbar = True
-            height = axs_heatmap[i - 1].get_position().height * 0.4
+            # height = np.clip(
+            #     axs_heatmap[i - 1].get_position().height * 0.2, 0.3, 0.4
+            # )
+            # height = 0.4
+            height = 5 / df.shape[0]
             cbar_ax = fig.add_axes(
                 [
-                    ax.get_position().x1 + (0.03 if linkage_row is None else 0.12),
-                    axs_heatmap[i - 1].get_position().y1 - height,
-                    0.03,
+                    ax.get_position().x1
+                    + (
+                        0.04
+                        + (
+                            0
+                            if linkage_row is None and dfs_iso is None
+                            else dend_row_ax_width
+                        )
+                    ),
+                    axs_heatmap[i - 1].get_position().y1 - 1.05 * height,
+                    cbar_ax_width,
                     height,
                 ]
             )
@@ -177,7 +191,6 @@ def _heatmap(
         if ax_dend is not None:
             df, linked = _get_dendrogram(df.transpose())
             df = df.transpose()
-
         if df_iso is not None:
             df_iso = df_iso.reindex(df.index, axis=0, fill_value="").loc[:, df.columns]
         sns.heatmap(
@@ -208,7 +221,7 @@ def _heatmap(
                 yticklabels=df.index,
                 annot=df_iso,
                 fmt="",
-                annot_kws={"color": "k", "linespacing": 0.1},
+                annot_kws={"color": "k"},
                 mask=~np.isinf(df).to_numpy(),
             )
 
@@ -239,7 +252,7 @@ def _heatmap(
                 [
                     ax.get_position().x1 + 0.01,
                     axs_heatmap[i - 1].get_position().y0,
-                    0.1,
+                    dend_row_ax_width,
                     axs_heatmap[i - 1].get_position().height,
                 ]
             )
@@ -697,7 +710,7 @@ if __name__ == "__main__":
             if not df_tax.equals(df_tax_iso):
                 raise ValueError("Taxonomy tables are not the same.")
         else:
-            df_otu_count_iso = df_otu_count = df_tax_iso = None
+            df_otu_count_iso = df_meta_iso = df_tax_iso = None
 
         if plot_type == "heatmap_raw":
             df_otu_rel_ab_g = _agg_along_axis(
@@ -748,7 +761,16 @@ if __name__ == "__main__":
                 res_group.index = res_group.index.map(lambda x: x.split("\t")[1])
 
             if df_otu_count_iso is not None:
-                res_iso = _agg_along_axis(df_otu_count_iso_g, df_tax[level], axis=1)
+                res_iso = _taxa_qc(
+                    _agg_along_axis(df_otu_count_iso_g, df_tax[level], axis=1),
+                    0,
+                    keep_rare=True,
+                    keep_unknown=False,
+                )
+                other_taxa = set(res_iso.columns) - set(res.columns)
+                # aggregate those into an "other" columns
+                res_iso["others"] = res_iso[list(other_taxa)].sum(axis=1)
+                res_iso = res_iso.drop(other_taxa, axis=1)
                 res_iso = res_iso[[i for i in sorted_taxa if i in res_iso.columns]]
                 res_iso_group_list = [
                     res_iso.loc[
@@ -942,7 +964,7 @@ if __name__ == "__main__":
                         )
                     dfs = ([res_group.T for res_group in res_group_list],)
                     df = pd.concat(dfs, axis=1)
-                    if feature_hierarchical_clustering:
+                    if feature_ordering == "hierarchical":
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )
@@ -1034,7 +1056,7 @@ if __name__ == "__main__":
                         np.log10(res_group).transpose() for res_group in res_group_list
                     ]
                     df = pd.concat(dfs, axis=1)
-                    if feature_hierarchical_clustering:
+                    if feature_ordering == "hierarchical":
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )
@@ -1044,6 +1066,49 @@ if __name__ == "__main__":
                             dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
                             i += df_temp.shape[1]
                         dfs = dfs_temp
+                    elif feature_ordering == "taxonomy_tree":
+                        df_tax_filtered = df_tax.query(f"{level}.isin(@dfs[0].index)")
+                        tree = get_taxonomy_tree(df_tax_filtered)
+                        taxon2marker = get_taxon2marker(df_tax_filtered)
+                        ordered_taxon = _calc_y(
+                            tree,
+                            df_tax_filtered,
+                            collapse_level=level,
+                            # base=dfs[0].shape[0] - len(tree.leaf_nodes()),
+                        )
+                        get_coords(
+                            tree.seed_node,
+                            max_x=tree.seed_node.distance_from_tip()
+                            + tree.seed_node.distance_from_root(),
+                        )
+                        # df_tax_filtered["temp_sort_by"] = pd.Categorical(
+                        #     df_tax_filtered[level], categories=ordered_taxon, ordered=True
+                        # )
+                        idxs = np.unique(ordered_taxon, return_index=True)[1]
+                        ordered_taxon = [ordered_taxon[i] for i in sorted(idxs)]
+                        df_tax_filtered = df_tax_filtered.iloc[
+                            pd.Categorical(
+                                df_tax_filtered[level],
+                                categories=ordered_taxon,
+                                ordered=True,
+                            ).argsort()
+                        ]
+
+                        taxon2color = get_taxon2color(
+                            df_tax_filtered, levels_of_interest=["order", "phylum"]
+                        )
+                        taxon2alpha = {
+                            k: v for k, v in df_tax_filtered.genus_p.to_dict().items()
+                        }
+                        tree.taxon2marker = taxon2marker
+                        tree.taxon2color = taxon2color
+                        tree.taxon2alpha = taxon2alpha
+                        tree.nodes_to_drop = set(df_tax.index)
+                        tree.terminal_nodes = set(ordered_taxon)
+                        # reorder the dataframe rows (taxa) to match the tree
+                        taxa_other = dfs[0].index.difference(ordered_taxon).tolist()
+                        dfs = [df.loc[ordered_taxon + taxa_other] for df in dfs]
+                        linkage_row = tree
                     else:
                         linkage_row = None
                     _heatmap(

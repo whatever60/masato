@@ -212,18 +212,27 @@ def _taxa_qc(
         When rel_ab_thres is an int, if the rank of its relative abundance is above
             the threshold in all samples.
     """
+    df_tax_rel_ab_temp = df_tax_rel_ab[
+        [
+            t
+            for t in df_tax_rel_ab.columns
+            if not t.endswith("_UNKNOWN") and t != "unknown"
+        ]
+    ]
     if rel_ab_thres and int(rel_ab_thres) == rel_ab_thres:
-        rare_taxa = df_tax_rel_ab.columns[
+        rare_taxa = df_tax_rel_ab_temp.columns[
             (
-                df_tax_rel_ab.rank(axis=1, ascending=False, method="min") > rel_ab_thres
+                df_tax_rel_ab_temp.rank(axis=1, ascending=False, method="max")
+                > rel_ab_thres
             ).all(axis=0)
         ].tolist()
     else:
-        rare_taxa = df_tax_rel_ab.columns[
-            (df_tax_rel_ab < rel_ab_thres).all(axis=0)
+        rare_taxa = df_tax_rel_ab_temp.columns[
+            (df_tax_rel_ab_temp < rel_ab_thres).all(axis=0)
         ].tolist()
-    if "unknown" in rare_taxa:
-        rare_taxa.remove("unknown")
+    # if "unknown" in rare_taxa:
+    #     rare_taxa.remove("unknown")
+    # rare_taxa = [t for t in rare_taxa if not t.endswith("_UNKNOWN") or t == "unknown"]
     if not keep_rare:
         df_tax_rel_ab = df_tax_rel_ab.drop(rare_taxa, axis=1)
     elif rare_taxa:
