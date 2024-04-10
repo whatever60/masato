@@ -168,15 +168,8 @@ def _heatmap(
             cbar_ax = fig.add_axes(
                 [
                     ax.get_position().x1
-                    + (
-                        0.04
-                        + (
-                            0
-                            if linkage_row is None and dfs_iso is None
-                            else dend_row_ax_width
-                        )
-                    ),
-                    axs_heatmap[i - 1].get_position().y1 - 1.05 * height,
+                    + (0.04 + (0 if linkage_row is None else dend_row_ax_width)),
+                    axs_heatmap[i - 1].get_position().y1 - 1.1 * height,
                     cbar_ax_width,
                     height,
                 ]
@@ -752,13 +745,6 @@ if __name__ == "__main__":
             )
             sorted_taxa = sorted(res.columns)
             res = res[sorted_taxa]
-            res_group_list = [
-                res.loc[name + "\t" + group[rep_group_key].unique()]
-                for name, group in zip(names, groups)
-            ]
-            # fix index
-            for res_group in res_group_list:
-                res_group.index = res_group.index.map(lambda x: x.split("\t")[1])
 
             if df_otu_count_iso is not None:
                 res_iso = _taxa_qc(
@@ -768,15 +754,38 @@ if __name__ == "__main__":
                     keep_unknown=False,
                 )
                 other_taxa = set(res_iso.columns) - set(res.columns)
-                # aggregate those into an "other" columns
-                res_iso["others"] = res_iso[list(other_taxa)].sum(axis=1)
-                res_iso = res_iso.drop(other_taxa, axis=1)
+                if other_taxa:
+                    # aggregate those into an "other" columns
+                    res_iso["others"] = res_iso[list(other_taxa)].sum(axis=1)
+                    res_iso = res_iso.drop(other_taxa, axis=1)
+                bulk_samples = set(res.index)
+                iso_samples = set(res_iso.index)
+                if not bulk_samples == iso_samples:
+                    # take the intersect and print warning for removing samples
+                    rep_group_both = bulk_samples & iso_samples
+                    if not rep_group_both:
+                        raise ValueError("No common replication group.")
+                    bulk_removed = bulk_samples - rep_group_both
+                    iso_removed = iso_samples - rep_group_both
+                    print(f"WARNING: Samples in bulk and isolate are not the same. ")
+                    if bulk_removed:
+                        print(f"Samples removed: {bulk_removed}.")
+                    if iso_removed:
+                        print(f"Samples removed: {iso_removed}.")
+                    # res = res[lambda x: x in rep_group_both]
+                    # res_iso = res_iso[lambda x: x in rep_group_both]
+                    res = res.query("index in @rep_group_both")
+                    res_iso = res_iso.query("index in @rep_group_both")
+                    width = res.shape[0] / 4 + 1.5
+
                 res_iso = res_iso[[i for i in sorted_taxa if i in res_iso.columns]]
                 res_iso_group_list = [
                     res_iso.loc[
-                        name
-                        + "\t"
-                        + group[isolate_rep_group_key or rep_group_key].unique()
+                        pd.Index(
+                            name
+                            + "\t"
+                            + group[isolate_rep_group_key or rep_group_key].unique()
+                        ).intersection(res_iso.index)
                     ]
                     for name, group in zip(names_iso, groups_iso)
                 ]
@@ -784,6 +793,20 @@ if __name__ == "__main__":
                     res_iso_group.index = res_iso_group.index.map(
                         lambda x: x.split("\t")[1]
                     )
+            else:
+                res_iso_group_list = None
+
+            res_group_list = [
+                res.loc[
+                    pd.Index(name + "\t" + group[rep_group_key].unique()).intersection(
+                        res.index
+                    )
+                ]
+                for name, group in zip(names, groups)
+            ]
+            # fix index
+            for res_group in res_group_list:
+                res_group.index = res_group.index.map(lambda x: x.split("\t")[1])
 
             num_cols = len(res_group_list)
             # wspace, hspace = 0.1, 0.01
@@ -800,7 +823,7 @@ if __name__ == "__main__":
                     num_cols,
                     fig_size,
                     ratio,
-                    height_ratios=(0.2, 1),
+                    height_ratios=None,
                     orientation=orientation,
                 )
                 _stacked_bar(
@@ -832,7 +855,7 @@ if __name__ == "__main__":
                     res.shape[0] // (res.shape[0] / width),
                     res.shape[1] // (res.shape[0] / width),
                 )
-                if plot_type in ["heatmap_log10", "all"]:
+                if plot_type in ["heatmap_log10", "heatmap", "all"]:
                     if sample_hierarchical_clustering:
                         fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
                     else:
@@ -849,10 +872,17 @@ if __name__ == "__main__":
                         # arr[arr == 0] = vmin
                         return arr
 
-                    dfs = [
-                        _get_log10(res_group.transpose())
-                        for res_group in res_group_list
-                    ]
+                    if plot_type == "heatmap":
+                        dfs = [res_group.transpose() for res_group in res_group_list]
+                    elif plot_type in ["heatmap_log10", "all"]:
+                        # suppress warning for 0 in log calculation
+                        with np.errstate(divide="ignore"):
+                            dfs = [
+                                _get_log10(res_group.transpose())
+                                for res_group in res_group_list
+                            ]
+                    else:
+                        raise ValueError(f"Unknown plot type: {plot_type}")
                     if df_otu_count_iso is not None:
 
                         def num_picks_to_symbol(num_picks: int) -> str:
@@ -877,6 +907,9 @@ if __name__ == "__main__":
                         dfs_iso = None
                     df = pd.concat(dfs, axis=1)
                     if feature_ordering == "hierarchical":
+                        if plot_type == "heatmap_log10":
+                            min_val = df.replace(-np.inf, np.nan).min().min()
+                            df = df.replace(-np.inf, min_val)
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )
@@ -955,48 +988,48 @@ if __name__ == "__main__":
                         bbox_inches="tight",
                         dpi=300,
                     )
-                if plot_type in ["heatmap"]:
-                    if sample_hierarchical_clustering:
-                        fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
-                    else:
-                        fig, (axs_dend, axs) = _get_subplots(
-                            num_cols, size, ratio, height_ratios=None
-                        )
-                    dfs = ([res_group.T for res_group in res_group_list],)
-                    df = pd.concat(dfs, axis=1)
-                    if feature_ordering == "hierarchical":
-                        df, linkage_row = _get_dendrogram(
-                            df, rows_to_ignore=["unknown", "others"]
-                        )
-                        dfs_temp = []
-                        i = 0
-                        for df_temp in dfs:
-                            dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
-                            i += df_temp.shape[1]
-                        dfs = dfs_temp
-                    else:
-                        linkage_row = None
-                    _heatmap(
-                        dfs,
-                        names,
-                        title=f"Taxonomy at {level} level",
-                        cbar_label="relative abundance",
-                        fig=fig,
-                        axs_heatmap=axs,
-                        axs_dend=axs_dend,
-                        cmap=None,
-                        linkage_row=linkage_row,
-                    )
-                    fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hm.png",
-                        bbox_inches="tight",
-                        dpi=300,
-                    )
-                    fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hm.pdf",
-                        bbox_inches="tight",
-                        dpi=300,
-                    )
+                # if plot_type in ["heatmap"]:
+                #     if sample_hierarchical_clustering:
+                #         fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
+                #     else:
+                #         fig, (axs_dend, axs) = _get_subplots(
+                #             num_cols, size, ratio, height_ratios=None
+                #         )
+                #     dfs = ([res_group.T for res_group in res_group_list],)
+                #     df = pd.concat(dfs, axis=1)
+                #     if feature_ordering == "hierarchical":
+                #         df, linkage_row = _get_dendrogram(
+                #             df, rows_to_ignore=["unknown", "others"]
+                #         )
+                #         dfs_temp = []
+                #         i = 0
+                #         for df_temp in dfs:
+                #             dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                #             i += df_temp.shape[1]
+                #         dfs = dfs_temp
+                #     else:
+                #         linkage_row = None
+                #     _heatmap(
+                #         dfs,
+                #         names,
+                #         title=f"Taxonomy at {level} level",
+                #         cbar_label="relative abundance",
+                #         fig=fig,
+                #         axs_heatmap=axs,
+                #         axs_dend=axs_dend,
+                #         cmap=None,
+                #         linkage_row=linkage_row,
+                #     )
+                #     fig.savefig(
+                #         f"{fig_dir}/rel_ab_group_{level}_hm.png",
+                #         bbox_inches="tight",
+                #         dpi=300,
+                #     )
+                #     fig.savefig(
+                #         f"{fig_dir}/rel_ab_group_{level}_hm.pdf",
+                #         bbox_inches="tight",
+                #         dpi=300,
+                #     )
                 if plot_type in ["heatmap_binary"]:
                     # size = size[0], size[1] / 2
                     if sample_hierarchical_clustering:
@@ -1052,9 +1085,11 @@ if __name__ == "__main__":
                             num_cols, size, ratio, height_ratios=None
                         )
                     vmax, vmin = 1e3, 0
-                    dfs = [
-                        np.log10(res_group).transpose() for res_group in res_group_list
-                    ]
+                    with np.errstate(divide="ignore"):
+                        dfs = [
+                            np.log10(res_group).transpose()
+                            for res_group in res_group_list
+                        ]
                     df = pd.concat(dfs, axis=1)
                     if feature_ordering == "hierarchical":
                         df, linkage_row = _get_dendrogram(
