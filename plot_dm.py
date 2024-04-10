@@ -95,7 +95,7 @@ def plot_dm(
         pc.index = df_otu_count.index
         variance = pc_obj.proportion_explained.to_numpy()
     elif distance == "euclid":
-        pc_obj = PCA(n_components=min(10, df_otu_count.shape[1])).fit(df_otu_count)
+        pc_obj = PCA(n_components=min(10, df_otu_count.shape[0])).fit(df_otu_count)
         pc = pc_obj.transform(df_otu_count)
         pc = pd.DataFrame(
             pc,
@@ -208,7 +208,7 @@ def plot_dm(
     if title is not None:
         fig.suptitle(title, fontsize=title_fs)
     fig.subplots_adjust(top=0.6)
-    fig.tight_layout()
+    # fig.tight_layout()
     fig.savefig(fig_path, dpi=300, bbox_inches="tight")
     # also save a pdf file
     fig.savefig(os.path.splitext(fig_path)[0] + ".pdf", bbox_inches="tight")
