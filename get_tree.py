@@ -195,7 +195,7 @@ if __name__ == "__main__":
         os.path.dirname(args.input_fasta),
         os.path.basename(args.input_fasta).split(".")[0],
     )
-    aln_file = prefix + (".phy" if args.tree_method == "raxml" else ".fasta")
+    aln_file = prefix + (".phy" if args.tree_method == "raxml" else ".alnfna")
     tree_file = prefix + ".newick"
     process_sequences(args.input_fasta, aln_file, tree_file, tree_method="fasttree")
 
