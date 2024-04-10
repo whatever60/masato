@@ -10,7 +10,7 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 
-PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q.gz$")
+PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q(.gz)?$")
 # - sample_R1.fq.gz or sample_R2.fq.gz (or fastq.gz, same for the following)
 # - sample_1.fq.gz or sample_2.fq.gz
 # - sample.R1.fq.gz or sample.R2.fq.gz
@@ -88,7 +88,7 @@ def smart_open(file_path: str, mode: str = None) -> IO[str] | gzip.GzipFile:
         mode (str): Mode in which the file should be opened. Defaults to 'rt' (read text).
 
     Returns:
-        Union[IO[str], gzip.GzipFile]: A file object or a gzip file object.
+        IO[str] | gzip.GzipFile: A file object or a gzip file object.
     """
     with open(file_path, "rb") as f:
         first_two_bytes = f.read(2)
@@ -106,7 +106,7 @@ def cat_fastq(
     metadata: str = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
-):
+) -> None:
     """Process FASTQ files in the given directory, renaming reads,and write the output
     to the specified file pointers. Output fastq will be interleaved if `output_fp_r2`
     is None.
