@@ -238,6 +238,12 @@ def combine_count(
     df_taxonomy_bacteria_tsv: str = None,
     df_taxonomy_fungi_tsv: str = None,
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
+    """This function simply combines the zotu count tables from two different 
+    experiments. We use it to merge amplicon sequencing data using 16S and ITS primer.
+    
+    It preprocesses the data according to what `get_otu_count` does, and 
+    renames ZOTU names that overlap between the two experiments.
+    """
     dfs_zotu_c = []
     dfs_taxonomy = []
     for df_zotu_count_tsv, df_taxonomy_tsv in zip(
@@ -248,13 +254,6 @@ def combine_count(
             df_zotu_c, _, df_taxonomy = get_otu_count(
                 df_zotu_count_tsv, df_isolate_meta_tsv, df_taxonomy_tsv, warning=False
             )
-            # remove columns of df_zotu_c and rows of df_taxonomy whose suffix is ZOTU_UNKNWON
-            # df_zotu_c = df_zotu_c.loc[
-            #     :, ~df_zotu_c.columns.str.endswith("ZOTU_UNKNOWN")
-            # ].copy()
-            # df_taxonomy = df_taxonomy.loc[
-            #     ~df_taxonomy.index.str.endswith("ZOTU_UNKNOWN")
-            # ].copy()
             dfs_zotu_c.append(df_zotu_c)
             dfs_taxonomy.append(df_taxonomy)
         else:
@@ -270,7 +269,7 @@ def combine_count(
         dfs_zotu_c[1].rename(columns=rename_dict_its, inplace=True)
         dfs_taxonomy[0].rename(index=rename_dict_16s, inplace=True)
         dfs_taxonomy[1].rename(index=rename_dict_its, inplace=True)
-    
+
     return dfs_zotu_c, dfs_taxonomy
 
 
@@ -282,7 +281,11 @@ def quality_control(
     """Get the ZOTU count table for pure isolates in an isolate sequencing experiment.
 
     If df_purity is a list, we assume the dataframes have the same index, and a row
-        is considered pure if it is pure in any dataframes.
+        is considered pure sa long as it is pure in ANY dataframes.
+    
+    Importantly, this function returns a binary count matrix whose index is from the 
+        index of `df_purity` and columns are from `top_1` column of `df_purity`.
+        This is rather suboptimal. I need to think of an alternative way.
     """
     if isinstance(df_purity, list):
         df_purity = pd.concat(df_purity[["top_1", "top_1_val", "total_counts"]], axis=1)
@@ -459,23 +462,35 @@ if __name__ == "__main__":
             ).items():
                 if df_purity_bacteria is not None:
                     df_purity_bacteria.to_csv(
-                        os.path.join(args.output_dir, f"purity_{l}_bacteria.tsv"),
+                        os.path.join(args.output_dir, f"purity_{l}_bacteria_only.tsv"),
                         sep="\t",
                     )
-                    otu_count_pure_b = quality_control(
-                        df_purity_bacteria, args.purity_cutoff, args.total_counts_cutoff
-                    ).reindex(df_count_b.columns, axis=1, fill_value=0)
+                    otu_count_pure_b = (
+                        quality_control(
+                            df_purity_bacteria,
+                            args.purity_cutoff,
+                            args.total_counts_cutoff,
+                        )
+                        .reindex(df_count_b.index, fill_value=0)
+                        .reindex(df_count_b.columns, axis=1, fill_value=0)
+                    )
                     otu_count_pure_b.transpose().to_csv(
                         os.path.join(args.output_dir, f"count_{l}_bacteria_only.tsv"),
                         sep="\t",
                     )
                 if df_purity_fungi is not None:
                     df_purity_fungi.to_csv(
-                        os.path.join(args.output_dir, f"purity_{l}_fungi.tsv"), sep="\t"
+                        os.path.join(args.output_dir, f"purity_{l}_fungi_only.tsv"), sep="\t"
                     )
-                    otu_count_pure_f = quality_control(
-                        df_purity_fungi, args.purity_cutoff, args.total_counts_cutoff
-                    ).reindex(df_count_f.columns, axis=1, fill_value=0)
+                    otu_count_pure_f = (
+                        quality_control(
+                            df_purity_fungi,
+                            args.purity_cutoff,
+                            args.total_counts_cutoff,
+                        )
+                        .reindex(df_count_f.index, fill_value=0)
+                        .reindex(df_count_f.columns, axis=1, fill_value=0)
+                    )
                     otu_count_pure_f.transpose().to_csv(
                         os.path.join(args.output_dir, f"count_{l}_fungi_only.tsv"),
                         sep="\t",
@@ -486,7 +501,7 @@ if __name__ == "__main__":
                     )
                     otu_count_pure = quality_control(
                         df_purity, args.purity_cutoff, args.total_counts_cutoff
-                    )
+                    ).reindex(df_count_b.index, fill_value=0)
                     otu_count_pure.reindex(
                         df_count_b.columns, axis=1, fill_value=0
                     ).transpose().to_csv(
@@ -500,6 +515,8 @@ if __name__ == "__main__":
                         sep="\t",
                     )
         else:
+            # simply concat them without any further modification, write data in the 
+            # same format as vsearch output
             df_zotu_count = (
                 pd.concat([df_count_b, df_count_f], axis=1).fillna(0).transpose()
             )
