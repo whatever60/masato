@@ -243,7 +243,9 @@ def _taxa_qc(
         df_tax_rel_ab = pd.concat([df_tax_rel_ab, df_tax_rel_ab_rare], axis=1)
     if not keep_unknown:
         df_tax_rel_ab = df_tax_rel_ab[
-            df_tax_rel_ab.columns[~df_tax_rel_ab.columns.str.endswith("unknown")]
+            df_tax_rel_ab.columns[
+                ~df_tax_rel_ab.columns.str.lower().str.endswith("unknown")
+            ]
         ]
         if (df_tax_rel_ab.dtypes != "int").any():
             df_tax_rel_ab = df_tax_rel_ab.div(df_tax_rel_ab.sum(1), 0).fillna(0)
@@ -308,7 +310,8 @@ def read_tables(
         if missing_samples:
             if warning:
                 print(
-                    "WARNING: The following samples are missing from OTU count table:"
+                    f"WARNING: The following {len(missing_samples)} samples are "
+                    "missing from OTU count table:"
                 )
                 print("\t", end="")
                 print(", ".join(sorted(missing_samples)))
