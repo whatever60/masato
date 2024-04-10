@@ -1,10 +1,18 @@
-input_fastq_dir=/mnt/c/aws_data/20240227_liyuan_maps_wgs_pilot_2/fastq_raw
+input_fastq_dir=/mnt/c/aws_data/20240328_liyuan_maps_wgs_random_hexamer/fastq
 # get parent directory
 data_dir=$(dirname $input_fastq_dir)
 output_dir=$data_dir/fastq_qc
 output_bam_dir=$data_dir/map
 mkdir -p $output_dir
 mkdir -p $output_bam_dir
+
+# maps random hexamer test
+mkdir -p $output_dir/round1
+./trim.py \
+  --mode maps_rand_hex_test \
+  -i $input_fastq_dir \
+  -o $output_dir/round1/merged.fq.gz \
+  -fb data/maps_seq/BC1.fasta
 
 # first round
 mkdir -p $output_dir/round1

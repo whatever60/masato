@@ -288,13 +288,21 @@ def get_primer_set(name: str) -> tuple[str, str]:
     #     return f"{PRIMER_MAPS_0}...{get_rc(PRIMER_MAPS_r)}", None
     elif name == "maps_1":
         # anchor
-        return f"^{PRIMER_MAPS_1};required...{get_rc(PRIMER_MAPS_r)};optional", None
+        return f"^{PRIMER_MAPS_1};required...{get_rc(PRIMER_MAPS_r)};optional", get_rc(
+            PRIMER_MAPS_1
+        )
     elif name == "maps_2":
         # anchor
         return f"^{PRIMER_MAPS_2}", None
     elif name == "maps_3":
         # anchor
         return f"^{PRIMER_MAPS_3}", None
+    elif name == "maps_rand_hex_test":
+        primer_maps = PRIMER_MAPS_1 + "N" * 6
+        return (
+            f"^{primer_maps};required...{get_rc(PRIMER_MAPS_r)};optional",
+            get_rc(primer_maps),
+        )
     else:
         raise ValueError("Invalid primer set. Must be either its or 16s.")
 
@@ -335,7 +343,7 @@ def isolate_150_preprocess(
         "-p",
         os.path.join(output_dir_demux, "{name1}-{name2}_R2.fq.gz"),
         "--cores",
-        "2",
+        "1",
         "--interleaved",
         "-",
     ]
@@ -493,6 +501,7 @@ def cutadapt_demux_merge_trim_se(
     ]
     if os.path.isdir(fastq_path):
         proc_args.append("-")
+        print_command(proc_args)
         cutadapt_demux_proc = subprocess.Popen(
             proc_args,
             stdin=subprocess.PIPE,
@@ -506,6 +515,7 @@ def cutadapt_demux_merge_trim_se(
         cutadapt_demux_proc.stdin.close()
         cutadapt_demux_proc.wait()
     else:
+        print_command(proc_args)
         proc_args.append(fastq_path)
         subprocess.run(proc_args)
 
@@ -545,6 +555,109 @@ def cutadapt_demux_merge_trim_se(
     cat_fastq_se(
         output_dir_demux,
         output_fp=cutadapt_trim_proc.stdin,
+        _have_sample_name=True,
+    )
+    cutadapt_trim_proc.stdin.close()
+    cutadapt_trim_proc.wait()
+
+    shutil.rmtree(output_dir_demux)
+
+
+def cutadapt_demux_merge_trim_pe(
+    fastq_path: str, output_dir: str, primer_set: str, barcode_fastq: str
+) -> None:
+    """Demultiplex and merge paired-end reads using cutadapt."""
+    if not os.path.isfile(barcode_fastq):
+        raise ValueError(f"{barcode_fastq} does not exist.")
+    output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
+    output_dir_demux = os.path.join(output_dir, "demux")
+    output_dir_demux_fail = os.path.join(output_dir, "demux_failed")
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir_demux, exist_ok=True)
+    os.makedirs(output_dir_demux_fail, exist_ok=True)
+    os.makedirs(output_dir_cutadapt, exist_ok=True)
+
+    # demultiplex with cutadapt
+    proc_args = [
+        "cutadapt",
+        "-e",
+        "1",
+        "--no-indels",
+        "-g",
+        f"^file:{barcode_fastq}",
+        "-o",
+        os.path.join(output_dir_demux, "{name}_R1.fq.gz"),
+        "-p",
+        os.path.join(output_dir_demux, "{name}_R2.fq.gz"),
+    ]
+    if os.path.isdir(fastq_path):
+        proc_args.extend(["--interleaved", "-"])
+        print_command(proc_args)
+        cutadapt_demux_proc = subprocess.Popen(
+            proc_args,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        cat_fastq(
+            fastq_path,
+            output_fp_r1=cutadapt_demux_proc.stdin,
+            output_fp_r2=cutadapt_demux_proc.stdin,
+        )
+        cutadapt_demux_proc.stdin.close()
+        cutadapt_demux_proc.wait()
+    else:
+        print_command(proc_args)
+        proc_args.extend([fastq_path])
+        subprocess.run(proc_args)
+
+    # no need for renaming
+    # rename_files_with_mmv(output_dir_demux, rename_pattern)
+    subprocess.run(
+        [
+            "mv",
+            os.path.join(output_dir_demux, "unknown_R1.fq.gz"),
+            os.path.join(output_dir_demux, "unknown_R2.fq.gz"),
+            os.path.join(output_dir, "demux_failed"),
+        ]
+    )
+    import pdb;     pdb.set_trace()
+    a, A = get_primer_set(primer_set)
+    proc_args = [
+        "cutadapt",
+        "-e",
+        "0.15",
+        "-a",
+        a,
+        "-A",
+        A,
+        "--pair-filter",
+        "first",  # discard pair if first read is not trimmed
+        "-o",
+        os.path.join(output_dir, "merged_R1.fq.gz"),
+        "-p",
+        os.path.join(output_dir, "merged_R2.fq.gz"),
+        "--untrimmed-output",
+        os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
+        "--untrimmed-paired-output",
+        os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
+        "--cores",
+        "4",
+        "--interleaved",
+        "-",
+    ]
+    print_command(proc_args)
+    cutadapt_trim_proc = subprocess.Popen(
+        proc_args,
+        stdin=subprocess.PIPE,
+        # silence cutadapt's output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    cat_fastq(
+        output_dir_demux,
+        output_fp_r1=cutadapt_trim_proc.stdin,
+        output_fp_r2=cutadapt_trim_proc.stdin,
         _have_sample_name=True,
     )
     cutadapt_trim_proc.stdin.close()
@@ -759,6 +872,7 @@ if __name__ == "__main__":
             "maps_round1",
             "maps_round2",
             "maps_round3",
+            "maps_rand_hex_test",
         ],
         help="Processing mode",
     )
@@ -818,4 +932,11 @@ if __name__ == "__main__":
             args.output,
             barcode_fastq=args.barcode_fwd,
             primer_set="maps_3",
+        )
+    elif args.mode == "maps_rand_hex_test":
+        cutadapt_demux_merge_trim_pe(
+            args.input_dir,
+            args.output,
+            barcode_fastq=args.barcode_fwd,
+            primer_set="maps_rand_hex_test",
         )
