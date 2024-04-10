@@ -6,8 +6,11 @@ import subprocess
 import os
 import time
 import tempfile
+from functools import singledispatch
 
+import numpy as np
 import pandas as pd
+import polars as pl
 from Bio import SeqIO
 from Bio.Blast import NCBIWWW, NCBIXML
 from Bio import Entrez
@@ -48,7 +51,15 @@ def blast_online(
         fasta_strings = "\n".join([record.format("fasta") for record in batch])
 
         result_handle = NCBIWWW.qblast(
-            "blastn", database, fasta_strings, format_type="XML"
+            "blastn",
+            database,
+            fasta_strings,
+            format_type="XML",
+            megablast=True,
+            word_size=64,
+            hitlist_size=100,
+            filter="mL",
+            expect=1e-30,
         )
 
         # Append result
@@ -56,12 +67,18 @@ def blast_online(
     return results
 
 
-def parse_blast_results(result_dir: str) -> pd.DataFrame:
+def parse_blast_results(result: str) -> pd.DataFrame:
     results = []
-    for xml_file in os.listdir(result_dir):
-        if xml_file.endswith(".xml"):
-            with open(os.path.join(result_dir, xml_file), "r") as f:
-                results.append(f.read())
+    if not os.path.isdir(result):
+        if not result.endswith(".xml"):
+            raise ValueError("Result must be a directory containing XML files.")
+        with open(result, "r") as f:
+            results.append(f.read())
+    else:
+        for xml_file in os.listdir(result):
+            if xml_file.endswith(".xml"):
+                with open(os.path.join(result, xml_file), "r") as f:
+                    results.append(f.read())
     return pd.concat([extract_info_from_xml(result, email) for result in results])
 
     # Write all results to the specified output file
@@ -84,7 +101,7 @@ def extract_info_from_xml(xml_string: str, email: str = "") -> pd.DataFrame:
     """
     records = []
 
-    with StringIO(xml_string) as xml_handle:
+    with StringIO(xml_string.replace("CREATE_VIEW\n\n\n", "")) as xml_handle:
         blast_records = NCBIXML.parse(xml_handle)
         for record in blast_records:
             for alignment in record.alignments:
@@ -166,15 +183,23 @@ def blast_local(input_path: str, database: str) -> pd.DataFrame:
     # temp file
     temp_file = tempfile.NamedTemporaryFile()
     blast_command = [
-        "megablast",
+        "blastn",
         "-query",
         input_path,
         "-db",
         database,
         "-num_threads",
         "16",
+        "-task",
+        "megablast",
+        "-word_size",
+        "64",  # not too short to speed up the search
+        "-dust",
+        "yes",
         "-evalue",
         "1e-30",
+        "-max_target_seqs",
+        "100",
         "-out",
         temp_file.name,
         "-outfmt",
@@ -233,14 +258,20 @@ def calculate_coverage(ranges: tuple[int, int], qlen: int) -> float:
     return coverage * 100  # Convert to percentage
 
 
-def add_query_coverage(df) -> pd.DataFrame:
+@singledispatch
+def add_query_coverage(df):
+    raise NotImplementedError("Unsupported type")
+
+
+@add_query_coverage.register(pd.DataFrame)
+def _(df) -> pd.DataFrame:
     """Add query coverage to the DataFrame without modifying it in-place."""
     # Ensure not modifying the original DataFrame
     df_copy = df.copy()
 
     # Group by qseqid and aggregate qstart and qend into lists
     agg_df = (
-        df_copy.groupby("qseqid")
+        df_copy.groupby(["qseqid", "sseqid"])
         .agg({"qlen": "first", "qstart": list, "qend": list})
         .reset_index()
     )
@@ -255,10 +286,37 @@ def add_query_coverage(df) -> pd.DataFrame:
 
     # Merge the coverage back into the original DataFrame
     result_df = pd.merge(
-        df_copy, agg_df[["qseqid", "coverage"]], on="qseqid", how="left"
+        df_copy,
+        agg_df[["qseqid", "sseqid", "coverage"]],
+        on=["qseqid", "sseqid"],
+        how="left",
     )
 
     return result_df
+
+
+def _calc_coverage_pl(struct: pl.Series) -> pl.Series:
+    ret = np.zeros(struct["qlen"], dtype=bool)
+    for start, end in zip(struct["qstart"], struct["qend"]):
+        ret[start - 1 : end] = True
+    return ret.sum() / struct["qlen"] * 100
+
+
+@add_query_coverage.register(pl.DataFrame)
+def _(df: pl.DataFrame) -> pl.DataFrame:
+    """Implementation for polars DataFrame."""
+    return df.join(
+        df.group_by(["qseqid", "sseqid"])
+        .agg(pl.first("qlen"), pl.col("qstart"), pl.col("qend"))
+        .with_columns(
+            pl.struct(["qstart", "qend", "qlen"])
+            .map_elements(_calc_coverage_pl)
+            .alias("coverage")
+        )
+        .select(["qseqid", "sseqid", "coverage"]),
+        on=["qseqid", "sseqid"],
+        how="left",
+    )
 
 
 if __name__ == "__main__":
@@ -292,16 +350,17 @@ if __name__ == "__main__":
     blast_output = args.blast_output
     batch_size = args.batch_size
     email = args.email
-    if os.path.isdir(os.path.dirname(database)):
-        df = blast_local(input_, database)
-        df.to_csv(blast_output, index=False, sep="\t")
-    elif os.path.isdir(input_):
+    if input_.endswith(".xml") or os.path.isdir(input_):
         df = parse_blast_results(input_)
+        df.to_csv(blast_output, index=False, sep="\t")
+    elif os.path.isdir(os.path.dirname(database)):
+        df = blast_local(input_, database)
         df.to_csv(blast_output, index=False, sep="\t")
     else:
         # must be a fasta file
         results = blast_online(input_, database, batch_size, email)
         blast_result_dir = os.path.join(os.path.dirname(blast_output), "blast_results")
+        os.makedirs(blast_result_dir, exist_ok=True)
         for i, result in enumerate(results):
             with open(
                 os.path.join(blast_result_dir, f"blast_result_{i}.xml"), "w"
