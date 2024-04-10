@@ -89,7 +89,8 @@ def plot_dm(
 ) -> None:
     if distance == "braycurtis":
         pc_obj = pcoa(
-            beta_diversity("braycurtis", df_otu_count), number_of_dimensions=10
+            beta_diversity("braycurtis", df_otu_count),
+            number_of_dimensions=min(10, df_otu_count.shape[0]),
         )
         pc = pc_obj.samples.copy()
         pc.index = df_otu_count.index
