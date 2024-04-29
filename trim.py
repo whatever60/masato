@@ -221,7 +221,7 @@ def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
             "8",
             # don't trim, so that amplicons have uniform length, as suggested by Edgar
             "--length_required",
-            "100",
+            "200",
             # if you don't want to merge, modify the following arguments
             # for the meaning of each of the following arguments, see fastp github README
             "--merge",
@@ -276,8 +276,8 @@ def get_primer_set(name: str) -> tuple[str, str]:
         )
     elif name == "16s":
         return (
-            f"{PRIMER_16S_5};required...{get_rc(PRIMER_16S_7)};optional",
-            f"{PRIMER_16S_7};required...{get_rc(PRIMER_16S_5)};optional",
+            f"^{PRIMER_16S_5};required...{get_rc(PRIMER_16S_7)};optional",
+            f"^{PRIMER_16S_7};required...{get_rc(PRIMER_16S_5)};optional",
         )
     elif name == "its_3":
         return get_rc(PRIMER_ITS_7), get_rc(PRIMER_ITS_5)
