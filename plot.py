@@ -138,8 +138,7 @@ def _heatmap(
     vmin: float | None = None,
     dfs_iso=None,
 ) -> None:
-    cbar_ax_width = 0.07
-    dend_row_ax_width = 0.2
+    dend_row_ax_width = 4 / sum(d.shape[1] for d in dfs)
     if dfs_iso is None:
         dfs_iso = [None] * len(dfs)
     for i, (ax, ax_dend, df, df_iso, name) in enumerate(
@@ -165,6 +164,7 @@ def _heatmap(
             # )
             # height = 0.4
             height = 5 / df.shape[0]
+            cbar_ax_width = 2 / sum(d.shape[1] for d in dfs)
             cbar_ax = fig.add_axes(
                 [
                     ax.get_position().x1
@@ -243,7 +243,7 @@ def _heatmap(
         if linkage_row is not None and i == len(axs_heatmap) - 1:
             dend_row_ax = fig.add_axes(
                 [
-                    ax.get_position().x1 + 0.01,
+                    ax.get_position().x1 + 0.005,
                     axs_heatmap[i - 1].get_position().y0,
                     dend_row_ax_width,
                     axs_heatmap[i - 1].get_position().height,
@@ -873,7 +873,10 @@ if __name__ == "__main__":
                         return arr
 
                     if plot_type == "heatmap":
-                        dfs = [res_group.transpose() for res_group in res_group_list]
+                        dfs = [
+                            res_group.transpose().replace(0, np.nan)
+                            for res_group in res_group_list
+                        ]
                     elif plot_type in ["heatmap_log10", "all"]:
                         # suppress warning for 0 in log calculation
                         with np.errstate(divide="ignore"):
@@ -910,6 +913,8 @@ if __name__ == "__main__":
                         if plot_type == "heatmap_log10":
                             min_val = df.replace(-np.inf, np.nan).min().min()
                             df = df.replace(-np.inf, min_val)
+                        else:
+                            df = df.fillna(0)
                         df, linkage_row = _get_dendrogram(
                             df, rows_to_ignore=["unknown", "others"]
                         )
@@ -968,23 +973,27 @@ if __name__ == "__main__":
                         dfs,
                         names,
                         title=f"Taxonomy at {level} level",
-                        cbar_label=f"log10(relative abundance)\n(range: [{vmin:.0e}, {vmax}])",
+                        cbar_label=(
+                            f"log10(relative abundance)\n(range: [{vmin:.0e}, {vmax}])"
+                            if plot_type == "heatmap_log10"
+                            else "Relative abundance"
+                        ),
                         fig=fig,
                         axs_heatmap=axs,
                         axs_dend=axs_dend,
                         cmap="rocket_r",
                         linkage_row=linkage_row,
-                        vmax=np.log10(vmax),
-                        vmin=np.log10(vmin),
+                        vmax=np.log10(vmax) if plot_type == "heatmap_log10" else vmax,
+                        vmin=np.log10(vmin) if plot_type == "heatmap_log10" else vmin,
                         dfs_iso=dfs_iso,
                     )
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hml.png",
+                        f"{fig_dir}/rel_ab_group_{level}_hm{'l' if plot_type == 'heatmap_log10' else ''}.png",
                         bbox_inches="tight",
                         dpi=300,
                     )
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hml.pdf",
+                        f"{fig_dir}/rel_ab_group_{level}_hm{'l' if plot_type == 'heatmap_log10' else ''}.pdf",
                         bbox_inches="tight",
                         dpi=300,
                     )
