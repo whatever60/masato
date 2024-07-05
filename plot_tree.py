@@ -145,10 +145,11 @@ def get_taxon2color(
     """tab20c for genus, tab20b for family, set3 for order, dark2 for class, set1 for phylum."""
     if levels_of_interest is None:
         levels = ["phylum", "class", "order", "family", "genus"]
+        cmaps = ["tab20b", "Set1", "tab20c", "Set3", "Dark2"]
     else:
         levels = levels_of_interest
+        cmaps = ["tab20b", "tab20c", "Dark2", "Set1", "Set3"]
     # colors should be circular in case there are more taxon than colors
-    cmaps = ["Set1", "tab20b", "tab20c", "Set3", "Dark2"]
     colors = list(map(lambda c: cycle(plt.get_cmap(c).colors), cmaps))
     level2color = {l: c for l, c in zip(levels, colors)}
     res = {}
@@ -269,7 +270,7 @@ def plot_tree(
                     [yt, yc, yc],
                     alpha=node_label2alpha.get(child_name, 1),
                     color=color,
-                    lw=1,
+                    lw=2,
                     solid_capstyle="round",
                     solid_joinstyle="round",
                 )
