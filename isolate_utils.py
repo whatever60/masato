@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
+from utils import write_table
 
 
 def _read_isolate_metadata(isolate_metadata_dir: str) -> pd.DataFrame:
@@ -51,7 +52,7 @@ def read_isolate_metadata_rich(
     isolate_metadata["spike_in_16s"] = "genus;Sporosarcina,family;Chloroplast"
     isolate_metadata["spike_in_its"] = None
     return isolate_metadata.sort_values(
-        ["sample_type", "medium_type", "src_plate", "sample"]
+        ["sample_group", "sample_type", "medium_type", "src_plate", "sample"]
     ).set_index("sample")
 
 
@@ -238,10 +239,10 @@ def combine_count(
     df_taxonomy_bacteria_tsv: str = None,
     df_taxonomy_fungi_tsv: str = None,
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
-    """This function simply combines the zotu count tables from two different 
+    """This function simply combines the zotu count tables from two different
     experiments. We use it to merge amplicon sequencing data using 16S and ITS primer.
-    
-    It preprocesses the data according to what `get_otu_count` does, and 
+
+    It preprocesses the data according to what `get_otu_count` does, and
     renames ZOTU names that overlap between the two experiments.
     """
     dfs_zotu_c = []
@@ -282,8 +283,8 @@ def quality_control(
 
     If df_purity is a list, we assume the dataframes have the same index, and a row
         is considered pure sa long as it is pure in ANY dataframes.
-    
-    Importantly, this function returns a binary count matrix whose index is from the 
+
+    Importantly, this function returns a binary count matrix whose index is from the
         index of `df_purity` and columns are from `top_1` column of `df_purity`.
         This is rather suboptimal. I need to think of an alternative way.
     """
@@ -461,9 +462,9 @@ if __name__ == "__main__":
                 levels=args.purity_levels,
             ).items():
                 if df_purity_bacteria is not None:
-                    df_purity_bacteria.to_csv(
+                    write_table(
+                        df_purity_bacteria,
                         os.path.join(args.output_dir, f"purity_{l}_bacteria_only.tsv"),
-                        sep="\t",
                     )
                     otu_count_pure_b = (
                         quality_control(
@@ -474,13 +475,14 @@ if __name__ == "__main__":
                         .reindex(df_count_b.index, fill_value=0)
                         .reindex(df_count_b.columns, axis=1, fill_value=0)
                     )
-                    otu_count_pure_b.transpose().to_csv(
-                        os.path.join(args.output_dir, f"count_{l}_bacteria_only.tsv"),
-                        sep="\t",
+                    write_table(
+                        otu_count_pure_b.transpose(),
+                        os.path.join(args.output_dir, f"count_{l}_bacteria_only.biom"),
                     )
                 if df_purity_fungi is not None:
-                    df_purity_fungi.to_csv(
-                        os.path.join(args.output_dir, f"purity_{l}_fungi_only.tsv"), sep="\t"
+                    write_table(
+                        df_purity_fungi,
+                        os.path.join(args.output_dir, f"purity_{l}_fungi_only.tsv"),
                     )
                     otu_count_pure_f = (
                         quality_control(
@@ -491,38 +493,46 @@ if __name__ == "__main__":
                         .reindex(df_count_f.index, fill_value=0)
                         .reindex(df_count_f.columns, axis=1, fill_value=0)
                     )
-                    otu_count_pure_f.transpose().to_csv(
-                        os.path.join(args.output_dir, f"count_{l}_fungi_only.tsv"),
-                        sep="\t",
+                    write_table(
+                        otu_count_pure_f.transpose(),
+                        os.path.join(args.output_dir, f"count_{l}_fungi_only.biom"),
                     )
                 if df_purity is not None:
-                    df_purity.to_csv(
-                        os.path.join(args.output_dir, f"purity_{l}.tsv"), sep="\t"
+                    write_table(
+                        df_purity, os.path.join(args.output_dir, f"purity_{l}.tsv")
                     )
-                    otu_count_pure = quality_control(
-                        df_purity, args.purity_cutoff, args.total_counts_cutoff
-                    ).reindex(df_count_b.index, fill_value=0)
-                    otu_count_pure.reindex(
-                        df_count_b.columns, axis=1, fill_value=0
-                    ).transpose().to_csv(
-                        os.path.join(args.output_dir, f"count_{l}_bacteria.tsv"),
-                        sep="\t",
+                    otu_count_pure = (
+                        quality_control(
+                            df_purity, args.purity_cutoff, args.total_counts_cutoff
+                        )
+                        .reindex(df_count_b.index, fill_value=0)
+                        .reindex(
+                            df_count_b.columns.tolist() + df_count_f.columns.tolist(),
+                            axis=1,
+                            fill_value=0,
+                        )
+                        .transpose()
                     )
-                    otu_count_pure.reindex(
-                        df_count_f.columns, axis=1, fill_value=0
-                    ).transpose().to_csv(
-                        os.path.join(args.output_dir, f"count_{l}_fungi.tsv"),
-                        sep="\t",
+                    write_table(
+                        otu_count_pure, os.path.join(args.output_dir, f"count_{l}.biom")
+                    )
+                    write_table(
+                        otu_count_pure.loc[df_count_b.columns],
+                        os.path.join(args.output_dir, f"count_{l}_bacteria.biom"),
+                    )
+                    write_table(
+                        otu_count_pure.loc[df_count_f.columns],
+                        os.path.join(args.output_dir, f"count_{l}_fungi.biom"),
                     )
         else:
-            # simply concat them without any further modification, write data in the 
+            # simply concat them without any further modification, write data in the
             # same format as vsearch output
             df_zotu_count = (
                 pd.concat([df_count_b, df_count_f], axis=1).fillna(0).transpose()
             )
             df_zotu_count.index.name = "#OTU ID"
             df_taxonomy = pd.concat([df_taxon_b, df_taxon_f], axis=0)
-            df_zotu_count.to_csv(os.path.join(args.output_dir, "count.tsv"), sep="\t")
+            write_table(df_zotu_count, os.path.join(args.output_dir, "count.biom"))
             df_taxonomy.to_csv(os.path.join(args.output_dir, "taxonomy.tsv"), sep="\t")
     else:
         raise ValueError("Invalid subcommand")
