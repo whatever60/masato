@@ -42,7 +42,7 @@ import argparse
 import pandas as pd
 import polars as pl
 
-# from skbio.diversity.alpha import chao1, shannon, simpson
+from utils import read_table, read_table
 
 
 def _find_otus_by_taxon(df_tax: pd.DataFrame, taxon: str) -> list[str]:
@@ -293,15 +293,12 @@ def read_tables(
         Sample metadata: pd.DataFrame.
         OTU taxonomy: pd.DataFrame.
     """
-    df_otu_count = pd.read_table(otu_count_table, index_col="#OTU ID")
+    df_otu_count = read_table(otu_count_table, index_col="#OTU ID")
     if not df_otu_count.columns.is_unique:
         raise ValueError("Sample names in OTU count table must be unique.")
 
     if metadata_path is not None:
-        if metadata_path.endswith(".csv"):
-            df_meta = pd.read_csv(metadata_path, index_col="sample", comment="#")
-        else:
-            df_meta = pd.read_table(metadata_path, index_col="sample", comment="#")
+        df_meta = read_table(metadata_path, index_col="sample", comment="#")
         if not df_meta.index.is_unique:
             raise ValueError("Sample names in metadata must be unique.")
 
@@ -333,7 +330,7 @@ def read_tables(
         # df_tax = pd.read_table(otu_taxonomy_path, index_col="otu").rename(
         #     {"otu.1": "otu"}, axis=1
         # )
-        df_tax = pd.read_table(otu_taxonomy_path, index_col="otu")
+        df_tax = read_table(otu_taxonomy_path, index_col="otu")
         if not df_tax.index.is_unique:
             raise ValueError("OTU numbers in taxonomy table must be unique.")
         # only care about OTUs with taxonomy
