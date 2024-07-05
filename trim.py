@@ -28,6 +28,11 @@ PRIMER_MAPS_1 = "GCGAGACACTGCTGAGCG"
 PRIMER_MAPS_2 = "GTCACTCCAGCCTCGTCG"
 PRIMER_MAPS_3 = "GTGTTCGTCGGCAGCGTC" + PRIMER_TN5
 PRIMER_MAPS_r = "GTCTCGTGGGCTCGG" + PRIMER_TN5
+ECREC_SPACER0 = "GAGCACAAATATCATCGCTCAAACC"
+ECREC_DR = "GTGTTCCCCGCGCCAGCGGGGATAAACC"
+ECREC_LEADER = "CTGGCTTAAAAAATCATTAATTAATAATAGGTTATGTTTAGA"
+RECORDING_PRIMER_3 = "AGATCGGAAGAGCACACGTCTGA"
+RECORDING_PRIMER_5 = "CCTACACGACGCTCTTCCGATCT"
 
 
 def run_trim_galore(input_dir, output_dir, pair):
@@ -268,7 +273,7 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
     os.chdir(original_dir)
 
 
-def get_primer_set(name: str) -> tuple[str, str]:
+def get_primer_set(name: str) -> tuple[str, str] | dict[str, str]:
     if name == "its":
         return (
             f"^{PRIMER_ITS_5};required...{get_rc(PRIMER_ITS_7)};optional",
@@ -303,8 +308,16 @@ def get_primer_set(name: str) -> tuple[str, str]:
             f"^{primer_maps};required...{get_rc(PRIMER_MAPS_r)};optional",
             get_rc(primer_maps),
         )
+    elif name == "recording_adapter":
+        return f"{RECORDING_PRIMER_5};rightmost...{RECORDING_PRIMER_3}"
+    elif name == "recording_leader_dr":
+        return ECREC_LEADER + ECREC_DR
+    elif name == "recording_spacer0":
+        return ECREC_SPACER0
+    elif name == "recording_dr":
+        return ECREC_DR
     else:
-        raise ValueError("Invalid primer set. Must be either its or 16s.")
+        raise ValueError(f"Invalid primer set name: {name}")
 
 
 def isolate_150_preprocess(
@@ -316,6 +329,7 @@ def isolate_150_preprocess(
     primer_set: str,
     first_k: int = None,
     min_length: int = 100,
+    early_stop: bool = False,
 ) -> None:
     output_dir, output_f = os.path.split(output_fastq)
     output_dir_demux = os.path.join(output_dir, "demux")
@@ -383,37 +397,34 @@ def isolate_150_preprocess(
 
     # trim with cutadapt
     a, A = get_primer_set(primer_set)
-    proc_args = [
-        "cutadapt",
-        "-e",
-        "0.15",
-        "-a",
-        a,
-        "-A",
-        A,
-        "--minimum-length",
-        str(min_length),
-        "--pair-filter",
-        "any",
-        "-O",
-        "16",
-        "-o",
-        os.path.join(output_dir_cutadapt, output_fastq_r1),
-        "-p",
-        os.path.join(output_dir_cutadapt, output_fastq_r2),
-        "--untrimmed-output",
-        os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
-        "--untrimmed-paired-output",
-        os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
-        "--too-short-output",
-        os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
-        "--too-short-paired-output",
-        os.path.join(output_dir_cutadapt, "too_short_2.fq.gz"),
-        "--cores",
-        "4",
-        "--interleaved",
-        "-",
-    ]
+    proc_args = (
+        ["cutadapt", "-e", "0.15", "-a", a]
+        + (["-A", A] if not early_stop else [])  # no trimming for read 2 if early stop
+        + [
+            "--minimum-length",
+            str(min_length),
+            "--pair-filter",
+            "any",
+            "-O",
+            "16",
+            "-o",
+            os.path.join(output_dir_cutadapt, output_fastq_r1),
+            "-p",
+            os.path.join(output_dir_cutadapt, output_fastq_r2),
+            "--untrimmed-output",
+            os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
+            "--untrimmed-paired-output",
+            os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
+            "--too-short-output",
+            os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
+            "--too-short-paired-output",
+            os.path.join(output_dir_cutadapt, "too_short_2.fq.gz"),
+            "--cores",
+            "4",
+            "--interleaved",
+            "-",
+        ]
+    )
     if first_k is not None:
         proc_args.extend(["-l", str(first_k)])
     print_command(proc_args)
@@ -621,7 +632,6 @@ def cutadapt_demux_merge_trim_pe(
             os.path.join(output_dir, "demux_failed"),
         ]
     )
-    import pdb;     pdb.set_trace()
     a, A = get_primer_set(primer_set)
     proc_args = [
         "cutadapt",
@@ -868,6 +878,7 @@ if __name__ == "__main__":
             "simple",
             "r1",
             "isolate_150",
+            "isolate_150_early_stop",
             "maps_round0",
             "maps_round1",
             "maps_round2",
@@ -880,7 +891,7 @@ if __name__ == "__main__":
         "-k", "--first_k", type=int, default=None, help="The first k bases to keep"
     )
     parser.add_argument(
-        "-l", "--min_length", type=int, default=100, help="Minimum length to keep"
+        "-l", "--min_length", default=100, help="Minimum length to keep"
     )
 
     args = parser.parse_args()
@@ -897,6 +908,18 @@ if __name__ == "__main__":
             primer_set=args.primer_set,
             first_k=args.first_k,
             min_length=args.min_length,
+        )
+    elif args.mode == "isolate_150_early_stop":
+        isolate_150_preprocess(
+            args.input_dir,
+            args.barcode_fwd,
+            args.barcode_rev,
+            args.pattern,
+            args.output,
+            primer_set=args.primer_set,
+            first_k=args.first_k,
+            min_length=args.min_length,
+            early_stop=True,
         )
     elif args.mode == "r1":
         cutadapt_merge_trim_se(
