@@ -90,13 +90,13 @@ def plot_dm(
     if distance == "braycurtis":
         pc_obj = pcoa(
             beta_diversity("braycurtis", df_otu_count),
-            number_of_dimensions=min(10, df_otu_count.shape[0]),
+            number_of_dimensions=min(10, *df_otu_count.shape),
         )
         pc = pc_obj.samples.copy()
         pc.index = df_otu_count.index
         variance = pc_obj.proportion_explained.to_numpy()
     elif distance == "euclid":
-        pc_obj = PCA(n_components=min(10, df_otu_count.shape[0])).fit(df_otu_count)
+        pc_obj = PCA(n_components=min(10, *df_otu_count.shape)).fit(df_otu_count)
         pc = pc_obj.transform(df_otu_count)
         pc = pd.DataFrame(
             pc,
