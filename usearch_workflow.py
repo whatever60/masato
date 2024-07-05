@@ -12,12 +12,17 @@ from io import StringIO
 import tempfile
 from concurrent.futures import as_completed
 import json
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 from loky import get_reusable_executor
 from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqRecord import SeqRecord
 from tqdm.auto import tqdm
+
+from utils import print_command, read_table, write_table
 
 
 def merge_pairs(
@@ -521,11 +526,14 @@ def unoise3(
     output_fasta: str | IO[str] | gzip.GzipFile | None,
     min_size: int,
     relabel_prefix: str = None,
+    size_out: bool = False,
     num_threads: int = 16,
     stderr: bool = True,
 ) -> None | str:
-    input_arg, stdin = _decide_io_arg(input_fastq)
     stderr = subprocess.DEVNULL if not stderr else None
+    input_arg, stdin = _decide_io_arg(input_fastq)
+    output_arg, stdout = _decide_io_arg(output_fasta)
+
     args_qc = [
         "vsearch",
         "--fastq_filter",
@@ -543,6 +551,7 @@ def unoise3(
         # "--threads",
         # str(num_threads),
     ]
+    # print_command(args_qc)
     qc_proc = subprocess.Popen(
         args_qc,
         stdin=stdin,
@@ -550,38 +559,36 @@ def unoise3(
         stderr=stderr,
     )
 
+    args_uniq = [
+        "vsearch",
+        "--fastx_uniques",
+        "-",
+        "--fastaout",
+        "-",
+        "--sizeout",
+    ]
+    # print_command(args_uniq)
     uniq_proc = subprocess.Popen(
-        [
-            "vsearch",
-            "--fastx_uniques",
-            "-",
-            "--fastaout",
-            "-",
-            "--sizeout",
-        ],
-        stdin=qc_proc.stdout,
-        stdout=subprocess.PIPE,
-        stderr=stderr,
-    )
-    unoise3_proc = subprocess.Popen(
-        [
-            "vsearch",
-            "--cluster_unoise",
-            "-",
-            "--minsize",
-            str(min_size),
-            "--centroids",
-            "-",
-            "--threads",
-            str(num_threads),
-        ],
-        stdin=uniq_proc.stdout,
-        stdout=subprocess.PIPE,
-        stderr=stderr,
+        args_uniq, stdin=qc_proc.stdout, stdout=subprocess.PIPE, stderr=stderr
     )
 
-    args_uchime3 = ["vsearch", "--uchime3_denovo", "-", "--nonchimeras"]
-    output_arg, stdout = _decide_io_arg(output_fasta)
+    args_unoise3 = [
+        "vsearch",
+        "--cluster_unoise",
+        "-",
+        "--minsize",
+        str(min_size),
+        "--sizeout",
+        "--centroids",
+        "-",
+        "--threads",
+        str(num_threads),
+    ]
+    # print_command(args_unoise3)
+    unoise3_proc = subprocess.Popen(
+        args_unoise3, stdin=uniq_proc.stdout, stdout=subprocess.PIPE, stderr=stderr
+    )
+
     args_uchime3 = [
         "vsearch",
         "--uchime3_denovo",
@@ -591,12 +598,12 @@ def unoise3(
         "--relabel",
         relabel_prefix or "ZOTU",
     ]
+    if size_out:
+        args_uchime3.append("--sizeout")
     uchime3_proc = subprocess.Popen(
-        args_uchime3,
-        stdin=unoise3_proc.stdout,
-        stdout=stdout,
-        stderr=stderr,
+        args_uchime3, stdin=unoise3_proc.stdout, stdout=stdout, stderr=stderr
     )
+
     qc_proc.stdout.close()
     uniq_proc.stdout.close()
     unoise3_proc.stdout.close()
@@ -607,6 +614,114 @@ def unoise3(
         return uchime3_out.decode()
 
 
+def search_global(
+    input_fastq: str | gzip.GzipFile | IO[str] | None,
+    zotu_fasta: str | gzip.GzipFile | IO[str] | None,
+    output_tsv: str | gzip.GzipFile | IO[str] | None,
+    not_matched_fasta: str | gzip.GzipFile | IO[str] | None = None,
+    id_: float = 0.97,
+    num_threads: int = 8,
+    stderr: bool = True,
+) -> None | str:
+    """
+    When `output_csv` is None, output is in captured in the stdout of returned process.
+    When `not_matched_fasta` is None, unmatched query sequences are not saved as fasta.
+    """
+    fastq_arg, stdin = _decide_io_arg(input_fastq)
+    db_arg, stdin_db = _decide_io_arg(zotu_fasta)
+    tsv_arg, stdout = _decide_io_arg(output_tsv)
+    if not_matched_fasta is None:
+        not_matched_arg, stdout_not_matched = None, None
+    else:
+        not_matched_arg, stdout_not_matched = _decide_io_arg(not_matched_fasta)
+    if stdin is not None and stdin_db is not None:
+        raise ValueError(
+            "`input_fastq` and `zotu_fasta` cannot both be file-like objects."
+        )
+    if stdout is not None and stdout_not_matched is not None:
+        raise ValueError(
+            "`output_tsv` and `not_matched_fasta` cannot both be file-like objects."
+        )
+    stderr = subprocess.DEVNULL if not stderr else None
+    # https://github.com/torognes/vsearch/issues/552
+    # https://github.com/torognes/vsearch/issues/467
+    # https://github.com/torognes/vsearch/issues/392
+    args_search = [
+        "vsearch",
+        "--usearch_global",
+        fastq_arg,
+        "--db",
+        db_arg,
+        "--strand",
+        "plus",
+        "--id",
+        str(id_),
+        "--maxaccepts",
+        "10",
+        "--maxhits",
+        "1",
+        "--threads",
+        str(num_threads),
+    ]
+    if tsv_arg == "-":
+        args_search.extend(["--otutabout", "-"])
+    elif tsv_arg.endswith(".tsv") or tsv_arg.endswith(".tsv.gz"):
+        args_search.extend(["--otutabout", tsv_arg])
+    elif output_tsv.endswith(".biom"):
+        args_search.extend(["--biomout", tsv_arg])
+    else:
+        raise ValueError(
+            f"Invalid output file extension {output_tsv}. Must be one of .tsv, .biom"
+        )
+    if not_matched_arg is not None:
+        args_search.extend(["--notmatched", not_matched_arg])
+    sg_proc = subprocess.Popen(
+        args_search,
+        stdin=stdin,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    sg_proc_out, _ = sg_proc.communicate(
+        input_fastq.encode() if stdin is subprocess.PIPE else None
+    )
+    if stdout is subprocess.PIPE:
+        return sg_proc_out.decode()
+
+
+def search_global_add_unknown(
+    input_fastq: str,
+    zotu_fasta: str,
+    output_tsv: str,
+    id_: float,
+    unknown_name: str,
+    num_threads: int,
+) -> None:
+    if not os.path.isfile(zotu_fasta):
+        raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
+    if not os.path.isfile(input_fastq):
+        raise ValueError(f"Query fastq file {input_fastq} does not exist")
+    if output_tsv is None:
+        output_dir = os.path.dirname(input_fastq)
+        output_tsv = os.path.join(output_dir, "unoise3_zotu.biom")
+    else:
+        output_dir = os.path.dirname(output_tsv)
+        os.makedirs(output_dir, exist_ok=True)
+    output_not_matched = os.path.join(output_dir, "notmatched.fa")
+
+    search_global(
+        input_fastq, zotu_fasta, output_tsv, output_not_matched, id_, num_threads
+    )
+
+    # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
+    # matched to anything in database
+    zotu_table = read_table(output_tsv)
+    counter = {i: 0 for i in zotu_table.columns}
+    for record in SeqIO.parse(output_not_matched, "fasta"):
+        counter[record.id.split("=")[1]] += 1
+    zotu_table.loc[unknown_name] = pd.Series(counter)
+    write_table(zotu_table, output_tsv)
+
+
 def _decide_io_arg(arg) -> tuple:
     if arg is None:  # PIPE as IO
         return "-", subprocess.PIPE
@@ -614,7 +729,11 @@ def _decide_io_arg(arg) -> tuple:
         if "\n" in arg:  # string literal corresponding to file content
             return "-", subprocess.PIPE
         else:  # file path
-            if not os.path.isfile(arg):
+            if (
+                not os.path.isfile(arg)
+                and not os.path.isdir(arg)
+                and not os.path.isdir(os.path.dirname(arg))
+            ):
                 raise ValueError(
                     f"{arg} does not appear to be stirng liternal and is also not a file path."
                 )
@@ -631,33 +750,62 @@ def _decide_io_arg(arg) -> tuple:
         return "-", arg
 
 
-def _workflow(seqs_sample: list[str], min_size: int) -> tuple[list[str], list[int]]:
+def _workflow_one_sample(
+    seqs_sample: list[str],
+    min_size: int,
+    prefix: str = None,
+    search: bool = True,
+) -> tuple[list[str], list[str], list[int]]:
     num_qs = len(seqs_sample)
     input_fastq = "".join(seqs_sample)
     db_fasta = tempfile.NamedTemporaryFile()
-    unoise3(input_fastq, db_fasta.name, min_size=min_size, num_threads=1, stderr=False)
-    zotus = [str(record.seq) for record in SeqIO.parse(open(db_fasta.name), "fasta")]
-    if zotus:
+    unoise3(
+        input_fastq,
+        db_fasta.name,
+        min_size=min_size,
+        relabel_prefix=prefix,
+        size_out=False,
+        num_threads=1,
+        stderr=False,
+    )
+    try:
+        zotus_name, zotus_seq = zip(
+            *(
+                (record.id, str(record.seq))
+                for record in SeqIO.parse(db_fasta.name, "fasta")
+            )
+        )
+    except ValueError:
+        zotus_name, zotus_seq = [], []
+    else:
+        zotus_name, zotus_seq = list(zotus_name), list(zotus_seq)
+    if zotus_name and search:
         count_tsv = search_global(
             input_fastq, db_fasta.name, None, num_threads=1, stderr=False
         )
         counts = pd.read_table(StringIO(count_tsv), index_col=0).iloc[:, 0].tolist()
         num_unknown = num_qs - sum(counts)
         if num_unknown > 0:
-            zotus.append("#UNKNOWN")
+            zotus_name.append("#UNKNOWN")
+            zotus_seq.append("#UNKNOWN")
             counts.append(num_unknown)
     else:
         counts = []
         if num_qs > 0:
-            zotus = ["#UNKNOWN"]
+            zotus_name = ["#UNKNOWN"]
+            zotus_seq = ["#UNKNOWN"]
             counts = [num_qs]
-
     db_fasta.close()
-    return zotus, counts
+    return zotus_name, zotus_seq, counts
 
 
 def workflow_per_sample(
-    input_fastq: str, output_json: str, min_size: int, num_threads: int
+    input_fastq: str,
+    output_path: str,
+    min_size: int,
+    prefix: str = None,
+    num_threads: int = 8,
+    search: bool = True,
 ) -> None:
     """Split input fastq file by sample and run a separate unoise3 workflow for each
         sample, so that each sample has one set of ZOTUs and counts.
@@ -665,8 +813,15 @@ def workflow_per_sample(
     We assume sequences in the input fastq file are named like `@sample=<sample1>` and
         sequences from the same sample form consecutive blocks.
 
-    Save results in a json file like:
-        `{<sample>: {"zotus": ["ATCG", "GCTA", ...], "counts": [10, 2, ...]}, ...}`
+    If output path ends with json, save results in a json file like:
+        `{<sample>: {"zotus": ["ATCG", "GCTA", ...], "counts": [10, 2, ...]}, ...}`.
+    If output path ends with fasta, save results in a fasta file file like:
+        ```
+        >ATCG
+        ATCG
+        ```
+        where sequence names are just sequences themselves. Identical sequences appear
+        only once.
     """
     from utils import smart_open
 
@@ -694,11 +849,19 @@ def workflow_per_sample(
                     f"{sample_name} both before {current_sample} and after"
                 )
             if executor:
-                future = executor.submit(_workflow, fastq_for_current_sample, min_size)
+                future = executor.submit(
+                    _workflow_one_sample,
+                    fastq_for_current_sample,
+                    min_size,
+                    prefix,
+                    search,
+                )
                 future2sample[future] = current_sample
                 # sample2future[current_sample] = future
             else:
-                results[sample] = _workflow(fastq_for_current_sample, min_size)
+                results[current_sample] = _workflow_one_sample(
+                    fastq_for_current_sample, min_size, prefix, search
+                )
             fastq_for_current_sample = []  # Reset for the next sample
             samples.add(current_sample)
         current_sample = sample_name
@@ -707,7 +870,9 @@ def workflow_per_sample(
     # Don't forget to process the last sample
     if fastq_for_current_sample:
         if executor:
-            future = executor.submit(_workflow, fastq_for_current_sample, min_size)
+            future = executor.submit(
+                _workflow_one_sample, fastq_for_current_sample, min_size, prefix, search
+            )
             future2sample[future] = current_sample
             # sample2future[current_sample] = future
             for future in tqdm(as_completed(future2sample), total=len(future2sample)):
@@ -716,15 +881,92 @@ def workflow_per_sample(
                 results[sample] = future.result()
             results = {s: results[s] for s in samples}
         else:
-            results[sample] = _workflow(fastq_for_current_sample, min_size)
-
+            results[current_sample] = _workflow_one_sample(
+                fastq_for_current_sample, min_size, prefix, search
+            )
     # Assuming each task's result could be aggregated into a final result dictionary
     # This step depends on how you implement the process_queue and task results handling
     # You would collect results from each completed task here
     # This could involve collecting returned values or reading from a shared resource
+    ext = os.path.splitext(output_path)[1]
+    if ext == ".json":
+        results = {s: {"zotus": z, "counts": c} for s, (_, z, c) in results.items()}
+        with open(output_path, "w") as outfile:
+            json.dump(results, outfile, indent=4)
+    elif ext in set([".fa", ".fasta", ".fna"]):
+        prefix = prefix or "ZOTU"
+        zotus = {}
+        for zns, zss, counts in results.values():
+            for zn, zs, count in zip(zns, zss, counts):
+                if zn == "#UNKNOWN":
+                    continue
+                zotus[zs] = zotus.get(zs, 0) + int(count.split("=")[1])
+        # sort by frequency
+        records = [
+            SeqRecord(Seq(z), id=f"{prefix}{i}", description=str(zotus[z]))
+            for i, z in enumerate(sorted(zotus, key=zotus.get, reverse=True), 1)
+        ]
+        with open(output_path, "w") as outfile:
+            SeqIO.write(records, outfile, "fasta")
+    else:
+        raise ValueError(
+            f"Invalid output file extension {ext}. Must be one of .json, .fa, .fasta, .fna"
+        )
 
-    with open(output_json, "w") as outfile:
-        json.dump(results, outfile, indent=4)
+
+def aggregate_samples(
+    input_json: str, output_fasta: str, output_count: str, prefix: str = None
+) -> None:
+    """Take the json file generated by workflow_per_sample and aggregate the results into
+    fasta file of ZOTUs and count file.
+
+    ZOTUs are labeled as <prefix><idx> where idx is determined by total counts across
+    all samples, starting from <prefix>1 (e.g. 16S_ZOTU1).
+    """
+    if prefix is None:
+        prefix = "ZOTU"
+    # Load JSON data from file
+    with open(input_json) as json_file:
+        data = json.load(json_file)
+
+    # Extract unique sequences and calculate their total counts, ignoring "#UNKNOWN"
+    sequence_counts = defaultdict(int)
+    key_sequence_counts = defaultdict(lambda: defaultdict(int))
+    for key, value in data.items():
+        for sequence, count in zip(value["zotus"], value["counts"]):
+            if sequence != "#UNKNOWN":
+                sequence_counts[sequence] += count
+                key_sequence_counts[key][sequence] = count
+
+    # Sort sequences by total counts from high to low
+    sorted_sequences = sorted(sequence_counts.items(), key=lambda x: x[1], reverse=True)
+
+    # Create a list of SeqRecord objects with names ZOTU1, ZOTU2, ..., and total counts as description
+    seq_records = []
+    sequence_to_zotu = {}
+    for i, (sequence, count) in enumerate(sorted_sequences, start=1):
+        zotu_name = f"{prefix}{i}"
+        seq_records.append(
+            SeqRecord(Seq(sequence), id=zotu_name, description=f"total_counts={count}")
+        )
+        sequence_to_zotu[sequence] = zotu_name
+
+    # Write to FASTA file
+    with open(output_fasta, "w") as fasta_file:
+        SeqIO.write(seq_records, fasta_file, "fasta")
+
+    # Create a DataFrame with ZOTU names as index and counts as values
+    df_data = defaultdict(list)
+    index = []
+
+    for sequence, zotu_name in sequence_to_zotu.items():
+        index.append(zotu_name)
+        for key in key_sequence_counts:
+            df_data[key].append(key_sequence_counts[key].get(sequence, 0))
+
+    df = pd.DataFrame(df_data, index=index)
+    df.index.name = "#OTU_ID"
+    write_table(df, output_count)
 
 
 def cluster_unoise3(
@@ -782,106 +1024,6 @@ def _fq2fa(input_fastq: str, output_fasta: str) -> None:
         subprocess.run(command, shell=True, check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error executing command: {e.stderr}")
-
-
-def search_global(
-    input_fastq: str | gzip.GzipFile | IO[str] | None,
-    zotu_fasta: str | gzip.GzipFile | IO[str] | None,
-    output_tsv: str | gzip.GzipFile | IO[str] | None,
-    not_matched_fasta: str | gzip.GzipFile | IO[str] | None = None,
-    id_: float = 0.97,
-    num_threads: int = 8,
-    stderr: bool = True,
-) -> None | str:
-    """
-    When `output_csv` is None, output is in captured in the stdout of returned process.
-    When `not_matched_fasta` is None, unmatched query sequences are not saved as fasta.
-    """
-    fastq_arg, stdin = _decide_io_arg(input_fastq)
-    db_arg, stdin_db = _decide_io_arg(zotu_fasta)
-    tsv_arg, stdout = _decide_io_arg(output_tsv)
-    if not_matched_fasta is None:
-        not_matched_arg, stdout_not_matched = None, None
-    else:
-        not_matched_arg, stdout_not_matched = _decide_io_arg(not_matched_fasta)
-    if stdin is not None and stdin_db is not None:
-        raise ValueError(
-            "`input_fastq` and `zotu_fasta` cannot both be file-like objects."
-        )
-    if stdout is not None and stdout_not_matched is not None:
-        raise ValueError(
-            "`output_tsv` and `not_matched_fasta` cannot both be file-like objects."
-        )
-    stderr = subprocess.DEVNULL if not stderr else None
-    # https://github.com/torognes/vsearch/issues/552
-    # https://github.com/torognes/vsearch/issues/467
-    # https://github.com/torognes/vsearch/issues/392
-    args_search = [
-        "vsearch",
-        "--usearch_global",
-        fastq_arg,
-        "--db",
-        db_arg,
-        "--strand",
-        "plus",
-        "--id",
-        str(id_),
-        "--maxaccepts",
-        "10",
-        "--maxhits",
-        "1",
-        "--otutabout",
-        tsv_arg,
-        "--threads",
-        str(num_threads),
-    ]
-    if stdout_not_matched is not None:
-        args_search.extend(["--notmatched", not_matched_arg])
-    sg_proc = subprocess.Popen(
-        args_search,
-        stdin=stdin,
-        stdout=stdout,
-        stderr=stderr,
-    )
-    sg_proc_out, _ = sg_proc.communicate(
-        input_fastq.encode() if stdin is subprocess.PIPE else None
-    )
-    if stdout is subprocess.PIPE:
-        return sg_proc_out.decode()
-
-
-def search_global_add_unknown(
-    input_fastq: str,
-    zotu_fasta: str,
-    output_tsv: str,
-    id_: float,
-    unknown_name: str,
-    num_threads: int,
-) -> None:
-    if not os.path.isfile(zotu_fasta):
-        raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
-    if not os.path.isfile(input_fastq):
-        raise ValueError(f"Query fastq file {input_fastq} does not exist")
-    if output_tsv is None:
-        output_dir = os.path.dirname(input_fastq)
-    else:
-        output_dir = os.path.dirname(output_tsv)
-        os.makedirs(output_dir, exist_ok=True)
-    output_tsv = os.path.join(output_dir, "unoise3_zotu.tsv")
-    output_not_matched = os.path.join(output_dir, "notmatched.fa")
-
-    search_global(
-        input_fastq, zotu_fasta, output_tsv, output_not_matched, id_, num_threads
-    ).wait()
-
-    # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
-    # matched to anything in database
-    zotu_table = pd.read_table(f"{output_dir}/unoise3_zotu.tsv", index_col=0)
-    counter = {i: 0 for i in zotu_table.columns}
-    for record in SeqIO.parse(output_not_matched, "fasta"):
-        counter[record.id.split("=")[1]] += 1
-    zotu_table.loc[unknown_name] = pd.Series(counter)
-    zotu_table.to_csv(f"{output_dir}/unoise3_zotu.tsv", sep="\t")
 
 
 def _cluster_unoise3(
@@ -1256,6 +1398,52 @@ def main():
     search_global_parser.add_argument(
         "-t", "--num_threads", type=int, default=8, help="Number of threads to use"
     )
+    workflow_per_sample_parser = subparsers.add_parser(
+        "workflow_per_sample", help="Run UNOISE3 workflow per sample"
+    )
+    workflow_per_sample_parser.add_argument(
+        "-i", "--input_fastq", help="Input FASTQ file to cluster", type=str
+    )
+    workflow_per_sample_parser.add_argument(
+        "-o", "--output_path", help="Output path", type=str
+    )
+    workflow_per_sample_parser.add_argument(
+        "-m", "--min_size", type=int, default=8, help="Minimum cluster size"
+    )
+    workflow_per_sample_parser.add_argument(
+        "-l",
+        "--relabel_prefix",
+        type=str,
+        default=None,
+        help="Prefix for ZOTU labels",
+    )
+    workflow_per_sample_parser.add_argument(
+        "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
+    )
+    workflow_per_sample_parser.add_argument(
+        "--search",
+        action="store_true",
+        help="Search reads against ZOTU database",
+    )
+    aggregate_samples_parser = subparsers.add_parser(
+        "aggregate_samples", help="Aggregate ZOTU counts across samples"
+    )
+    aggregate_samples_parser.add_argument(
+        "-i", "--input_json", help="Input JSON file with ZOTU counts", type=str
+    )
+    aggregate_samples_parser.add_argument(
+        "-of", "--output_fasta", help="Output path for aggregated ZOTU fasta", type=str
+    )
+    aggregate_samples_parser.add_argument(
+        "-oc", "--output_count", help="Output path for aggregated ZOTU counts", type=str
+    )
+    aggregate_samples_parser.add_argument(
+        "-p",
+        "--prefix",
+        help="Prefix for ZOTU labels",
+        type=str,
+        default=None,
+    )
 
     tax_nbc_parser = subparsers.add_parser(
         "tax_nbc", help="Taxonomy classification using NBC"
@@ -1304,18 +1492,31 @@ def main():
         unoise3(
             args.input_fastq,
             args.output_fasta,
-            args.minsize,
-            args.relabel_prefix,
-            args.num_threads,
-        ).wait()
+            min_size=args.minsize,
+            relabel_prefix=args.relabel_prefix,
+            num_threads=args.num_threads,
+        )
     elif args.subcommand == "search_global":
         search_global_add_unknown(
             args.input_fastq,
             args.zotu_fasta,
             args.output_tsv,
-            args.id,
-            args.unknown_name,
-            args.num_threads,
+            id_=args.id,
+            unknown_name=args.unknown_name,
+            num_threads=args.num_threads,
+        )
+    elif args.subcommand == "workflow_per_sample":
+        workflow_per_sample(
+            args.input_fastq,
+            args.output_path,
+            min_size=args.min_size,
+            prefix=args.relabel_prefix,
+            num_threads=args.num_threads,
+            search=args.search,
+        )
+    elif args.subcommand == "aggregate_samples":
+        aggregate_samples(
+            args.input_json, args.output_fasta, args.output_count, prefix=args.prefix
         )
     elif args.subcommand == "tax_nbc":
         tax_nbc(args.input_fasta, args.db_fasta, args.output_path, args.num_threads)
