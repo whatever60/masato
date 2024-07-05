@@ -120,6 +120,7 @@ def process_sequences(
         return 1
     temp_aln = tempfile.NamedTemporaryFile(mode="w", suffix=".aln")
     temp_aln.write(mafft_result.stdout)
+    temp_aln.flush()
 
     # Run trimal on the alignment file and check if it ran successfully
     trimal_result = run_trimal(temp_aln.name, alignment_out, tree_method)
