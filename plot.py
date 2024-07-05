@@ -734,7 +734,7 @@ if __name__ == "__main__":
             rel_ab_thresholds = rel_ab_thresholds * len(tax_levels)
 
         # an empirical way to determine width for pretty figure
-        width = df_otu_rel_ab_g.shape[0] / 4 + 1.5
+        width = df_otu_rel_ab_g.shape[0] / 3.5 + 1.5
         for level, rel_ab_thres in zip(tax_levels, rel_ab_thresholds):
             # aggregate at taxonomic level
             res = _taxa_qc(
@@ -853,7 +853,7 @@ if __name__ == "__main__":
             ]:
                 size = (
                     res.shape[0] // (res.shape[0] / width),
-                    res.shape[1] // (res.shape[0] / width),
+                    max(1 ,res.shape[1] // (res.shape[0] / width)),
                 )
                 if plot_type in ["heatmap_log10", "heatmap", "all"]:
                     if sample_hierarchical_clustering:
@@ -1263,6 +1263,7 @@ if __name__ == "__main__":
                 )
                 if len(groups) == 1:
                     axs = [axs]
+                import pdb; pdb.set_trace()
                 _barplot_with_whisker_strip(
                     groups,
                     names=names,
