@@ -132,9 +132,35 @@ def _calc_norm_factor(
 def _agg_along_axis(
     df: pd.DataFrame, series: pd.Series, axis: int, aggfunc: str = None
 ) -> pd.DataFrame:
-    index_name = df.index.name
-    series_index_name = series.index.name
-    df = pl.from_pandas(df.reset_index().rename(columns={"index": "row"}))
+    """
+    Aggregate a DataFrame along a specified axis using a given function.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The input DataFrame to be aggregated.
+    series : pd.Series
+        A Series used for grouping the DataFrame.
+    axis : int
+        The axis along which to perform the aggregation.
+        0 for rows and 1 for columns.
+    aggfunc : str, optional
+        The aggregation function to use. Must be either 'mean' or 'sum'.
+        If None, the function defaults to mean for axis 0 and sum for axis 1.
+
+    Returns
+    -------
+    pd.DataFrame
+        The aggregated DataFrame with groups based on the series provided.
+
+    Raises
+    ------
+    ValueError
+        If `aggfunc` is not 'mean' or 'sum'.
+    """
+    index_name = df.index.name or "index"
+    series_index_name = series.index.name or "index"
+    df = pl.from_pandas(df.reset_index().rename(columns={index_name: "row"}))
     exprs = [pl.col("rel_ab").mean(), pl.col("rel_ab").sum()]
 
     if not aggfunc:
@@ -151,13 +177,13 @@ def _agg_along_axis(
             series.reset_index(name="group").rename(columns={series_index_name: "row"})
         )
         df_g = (
-            df.melt(id_vars="row", variable_name="col", value_name="rel_ab")
+            df.unpivot(index="row", variable_name="col", value_name="rel_ab")
             .join(series, on="row")
             .group_by(["col", "group"])
             .agg(rel_ab=expr)
             .pivot(
                 index="group",
-                columns="col",
+                on="col",
                 values="rel_ab",
             )
             .to_pandas()
@@ -168,13 +194,13 @@ def _agg_along_axis(
             series.reset_index(name="group").rename(columns={series_index_name: "col"})
         )
         df_g = (
-            df.melt(id_vars="row", variable_name="col", value_name="rel_ab")
+            df.unpivot(index="row", variable_name="col", value_name="rel_ab")
             .join(series, on="col")
             .group_by(["row", "group"])
             .agg(rel_ab=expr)
             .pivot(
                 index="group",
-                columns="row",
+                on="row",
                 values="rel_ab",
             )
             .to_pandas()
@@ -206,11 +232,35 @@ def _taxa_qc(
     keep_unknown: bool,
 ) -> pd.DataFrame:
     """
+    Perform quality control on taxonomic data by filtering rare and unknown taxa.
+
+    Parameters
+    ----------
+    df_tax_rel_ab : pd.DataFrame
+        A DataFrame containing the relative abundance of taxa. Columns represent
+            different taxa, and rows represent samples.
+    rel_ab_thres : float
+        Threshold to determine rare taxa. If float, taxa with relative abundance below
+            this threshold in all samples are considered rare.
+        If int, taxa with a rank of relative abundance above this threshold in all
+            samples are considered rare.
+    keep_rare : bool
+        If False, remove rare taxa. If True, combine rare taxa into a single 'others' column.
+    keep_unknown : bool
+        If False, remove taxa labeled as unknown. If True, keep unknown taxa.
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with filtered taxa based on the provided thresholds and options.
+
+    Notes
+    -----
     A taxon is defined as rare:
-        When rel_ab_thres is a float, if its relative abundance is below the threshold
-            in all samples.
-        When rel_ab_thres is an int, if the rank of its relative abundance is above
-            the threshold in all samples.
+    - When `rel_ab_thres` is a float: If its relative abundance is below the threshold in all samples.
+    - When `rel_ab_thres` is an int: If the rank of its relative abundance is above the threshold in all samples.
+
+    A taxon is defined as unknown if its name contains 'unknown' or ends with '_UNKNOWN'.
     """
     df_tax_rel_ab_temp = df_tax_rel_ab[
         [
@@ -337,6 +387,7 @@ def read_tables(
         otu_in_tax = set(df_tax.index)
         otu_in_count = set(df_otu_count.columns)
         no_tax_otus = list(otu_in_count - otu_in_tax)
+        no_count_otus = list(otu_in_tax - otu_in_count)
         if no_tax_otus:
             common_otus = list(otu_in_tax & otu_in_count)
             df_tax = df_tax.loc[common_otus]
@@ -347,6 +398,14 @@ def read_tables(
             )
             df_tax_add.loc[:, df_tax.columns[df_tax.columns.str.endswith("_p")]] = -1
             df_tax = pd.concat([df_tax, df_tax_add]).loc[df_otu_count.columns]
+        if no_count_otus:  # add missing OTUs with all zero counts
+            df_otu_count = pd.concat(
+                [
+                    df_otu_count,
+                    pd.DataFrame(0, columns=no_count_otus, index=df_otu_count.index),
+                ],
+                axis=1,
+            )
     else:
         df_tax = pd.DataFrame(index=df_otu_count.columns)
     if "otu" not in df_tax.columns:
