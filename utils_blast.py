@@ -310,7 +310,7 @@ def _(df: pl.DataFrame) -> pl.DataFrame:
         .agg(pl.first("qlen"), pl.col("qstart"), pl.col("qend"))
         .with_columns(
             pl.struct(["qstart", "qend", "qlen"])
-            .map_elements(_calc_coverage_pl)
+            .map_elements(_calc_coverage_pl, return_dtype=pl.Float64)
             .alias("coverage")
         )
         .select(["qseqid", "sseqid", "coverage"]),
