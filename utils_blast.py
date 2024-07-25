@@ -178,11 +178,11 @@ def blast_local(input_path: str, database: str) -> pd.DataFrame:
     # custom_blast_format = '6 qseqid qlen sseqid pident length qstart qend sstart send evalue bitscore slen staxids'
     custom_blast_format = "6 qseqid qlen sseqid pident length qstart qend sstart send evalue bitscore slen staxids"
 
-    # db_command = ["makeblastdb", "-in", subject, "-dbtype", "nucl", "-out", "temp_db"] #command to 1econstruct database
-    # sd = subprocess.Popen(db_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE); sd.communicate()
+    # db_cmd = ["makeblastdb", "-in", subject, "-dbtype", "nucl", "-out", "temp_db"] #command to 1econstruct database
+    # sd = subprocess.Popen(db_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE); sd.communicate()
     # temp file
     temp_file = tempfile.NamedTemporaryFile()
-    blast_command = [
+    blast_cmd = [
         "blastn",
         "-query",
         input_path,
@@ -206,9 +206,9 @@ def blast_local(input_path: str, database: str) -> pd.DataFrame:
         custom_blast_format,
     ]
     print("Running blastn locally with command:")
-    print_command(blast_command)
+    print_command(blast_cmd)
     sp = subprocess.Popen(
-        blast_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        blast_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )  # blast = sp.communicate()
     err = sp.stderr.read()
     if err:

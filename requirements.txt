@@ -1,0 +1,17 @@
+# Standard libraries do not need to be listed, but third-party packages do
+pandas
+polars
+scikit-bio
+numpy
+biopython
+dendropy
+joblib
+matplotlib
+seaborn
+scikit-learn
+asyncio
+tqdm
+loky
+biom-format
+rich
+umi-tools

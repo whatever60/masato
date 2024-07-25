@@ -1030,10 +1030,10 @@ def _fq2fa(input_fastq: str, output_fasta: str) -> None:
     """Convert fastq (could be gzipped) to output fasta (gzipped) using seqtk"""
     try:
         # Constructing the seqtk command
-        command = f"seqtk seq -a {input_fastq} | pigz -f > {output_fasta}"
+        cmd = f"seqtk seq -a {input_fastq} | pigz -f > {output_fasta}"
 
         # Executing the command
-        subprocess.run(command, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Error executing command: {e.stderr}")
 

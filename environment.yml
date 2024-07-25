@@ -1,0 +1,40 @@
+name: easy_amplicon_0.1
+channels:
+  - defaults
+  - bioconda
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pandas
+  - polars
+  - scikit-bio
+  - numpy
+  - biopython
+  - dendropy
+  - joblib
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - tqdm
+  - loky
+  - biom-format
+  - rich
+  - umi_tools
+  - fastp
+  - trimmomatic
+  - trim-galore
+  - cutadapt
+  - seqkit
+  - samtools
+  - bwa-mem2
+  - mmseqs2
+  - mafft
+  - trimal
+  - raxml
+  - fasttree
+  - blast
+  - pigz
+  - vsearch
+  - pip
+  - pip:
+    - -r requirements.txt

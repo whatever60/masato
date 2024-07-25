@@ -32,29 +32,29 @@ def map_se(
         # Step 2: Align the reads and pipe directly to BAM, then sort
         if not bwa_log:
             bwa_log = "/dev/null"
-        align_command = (
+        align_cmd = (
             f"bwa-mem2 mem -t {num_threads} {args}{reference_genome} {reads_fastq} "
             f"2> {bwa_log} | samtools view -S -b - | samtools sort -o {bam_file}"
         )
-        subprocess.run(align_command, shell=True, check=True)
+        subprocess.run(align_cmd, shell=True, check=True)
 
         # Step 3: Index the sorted BAM file
-        index_command = f"samtools index {bam_file}"
-        subprocess.run(index_command, shell=True, check=True)
+        index_cmd = f"samtools index {bam_file}"
+        subprocess.run(index_cmd, shell=True, check=True)
 
         # Step 4: Extract unmapped reads
-        extract_mapped_command = (
+        extract_mapped_cmd = (
             f"samtools view -F 4 -b {bam_file} | samtools fastq - | pigz > {mapped_reads}"
         )
         subprocess.run(
-            extract_mapped_command, shell=True, check=True, stderr=subprocess.DEVNULL
+            extract_mapped_cmd, shell=True, check=True, stderr=subprocess.DEVNULL
         )
 
-        extract_unmapped_command = (
+        extract_unmapped_cmd = (
             f"samtools view -f 4 -b {bam_file} | samtools fastq - | pigz > {unmapped_reads}"
         )
         subprocess.run(
-            extract_unmapped_command, shell=True, check=True, stderr=subprocess.DEVNULL
+            extract_unmapped_cmd, shell=True, check=True, stderr=subprocess.DEVNULL
         )
 
     except subprocess.CalledProcessError as e:
