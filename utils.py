@@ -81,7 +81,7 @@ def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
     return matched_pairs
 
 
-def smart_open(file_path: str, mode: str = None) -> IO[str] | gzip.GzipFile:
+def smart_open(file_path: str, mode: str = "r") -> IO[str] | gzip.GzipFile:
     """Open a file as text or as a gzip file based on its magic number.
 
     Args:
@@ -91,13 +91,21 @@ def smart_open(file_path: str, mode: str = None) -> IO[str] | gzip.GzipFile:
     Returns:
         IO[str] | gzip.GzipFile: A file object or a gzip file object.
     """
-    with open(file_path, "rb") as f:
-        first_two_bytes = f.read(2)
 
-    if first_two_bytes == b"\x1f\x8b":  # Magic number for gzip files
-        return gzip.open(file_path, "rt" if mode is None else mode)
+    if mode == "r":
+        with open(file_path, "rb") as f:
+            first_two_bytes = f.read(2)
+        if first_two_bytes == b"\x1f\x8b":  # Magic number for gzip files
+            return gzip.open(file_path, "rt")
+        else:
+            return open(file_path, "r")
+    elif mode == "w":
+        if file_path.endswith(".gz") or file_path.endswith(".gzip"):
+            return gzip.open(file_path, "wt")
+        else:
+            return open(file_path, "w")
     else:
-        return open(file_path, "r" if mode is None else mode)
+        raise ValueError(f"Mode must be 'r' or 'w' if specified, getting {mode}.")
 
 
 def cat_fastq(
