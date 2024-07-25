@@ -133,6 +133,7 @@ def _heatmap(
     axs_dend: list[plt.Axes],
     cmap: str,
     linkage_row: np.ndarray | dendropy.Tree = None,
+    linkage_row_legend: dict=None,
     cbar_label: str = None,
     vmax: float | None = None,
     vmin: float | None = None,
@@ -283,6 +284,15 @@ def _heatmap(
                     f"Unknown linkage_row type {type(linkage_row)}. "
                     "Must be np.ndarray or dendropy.Tree."
                 )
+            if linkage_row_legend is not None:
+                # add legend with line style
+                for label, color in linkage_row_legend.items():
+                    if color is None:
+                        continue
+                    dend_row_ax.plot(
+                        [], [], color=color, label=label, linewidth=2, linestyle="-"
+                    )
+                dend_row_ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
 
         # turn off y axis ticks and tick labels (set invisible) except for the first panel
         if i == 0:
@@ -406,6 +416,7 @@ def _calc_alpha_metrics(df: pd.DataFrame) -> pd.DataFrame:
         {
             "chao1": df.apply(chao1, axis=1),
             "richness": df.apply(lambda x: (x > 0).sum(), axis=1),
+            "total_counts": df.sum(axis=1),
             "shannon": df.apply(shannon, axis=1),
             "simpson": df.apply(simpson, axis=1),
         },
@@ -853,7 +864,7 @@ if __name__ == "__main__":
             ]:
                 size = (
                     res.shape[0] // (res.shape[0] / width),
-                    max(1 ,res.shape[1] // (res.shape[0] / width)),
+                    max(1, res.shape[1] // (res.shape[0] / width)),
                 )
                 if plot_type in ["heatmap_log10", "heatmap", "all"]:
                     if sample_hierarchical_clustering:
@@ -909,6 +920,7 @@ if __name__ == "__main__":
                     else:
                         dfs_iso = None
                     df = pd.concat(dfs, axis=1)
+                    taxon2color = None
                     if feature_ordering == "hierarchical":
                         if plot_type == "heatmap_log10":
                             min_val = df.replace(-np.inf, np.nan).min().min()
@@ -983,6 +995,7 @@ if __name__ == "__main__":
                         axs_dend=axs_dend,
                         cmap="rocket_r",
                         linkage_row=linkage_row,
+                        linkage_row_legend=taxon2color,
                         vmax=np.log10(vmax) if plot_type == "heatmap_log10" else vmax,
                         vmin=np.log10(vmin) if plot_type == "heatmap_log10" else vmin,
                         dfs_iso=dfs_iso,
@@ -1167,6 +1180,7 @@ if __name__ == "__main__":
                         # cmap=sns.cubehelix_palette(as_cmap=True),
                         cmap="summer",
                         linkage_row=linkage_row,
+                        linkage_row_legend=taxon2color,
                         vmax=np.log10(vmax),
                         vmin=0,
                     )
@@ -1254,8 +1268,14 @@ if __name__ == "__main__":
             _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
             title_prefix = f"{'ZOTU' if level == 'otu' else level.capitalize()}"
             for column_of_interest, title in zip(
-                ["shannon", "simpson", "richness", "chao1"],
-                ["Shannon entropy", "Simpson's index", "Richness", "Chao1 index"],
+                ["shannon", "simpson", "richness", "chao1", "total_counts"],
+                [
+                    "Shannon entropy",
+                    "Simpson's index",
+                    "Richness",
+                    "Chao1 index",
+                    "Total counts",
+                ],
             ):
                 title = f"{title_prefix} {title}"
                 fig, axs = plt.subplots(
@@ -1263,7 +1283,6 @@ if __name__ == "__main__":
                 )
                 if len(groups) == 1:
                     axs = [axs]
-                import pdb; pdb.set_trace()
                 _barplot_with_whisker_strip(
                     groups,
                     names=names,
