@@ -274,6 +274,9 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
 
 
 def get_primer_set(name: str) -> tuple[str, str] | dict[str, str]:
+    def get_min_overlap(adapter: str, frac: float=0.8) -> int:
+        return int(len(adapter) * 0.8)
+
     if name == "its":
         return (
             f"^{PRIMER_ITS_5};required...{get_rc(PRIMER_ITS_7)};optional",
@@ -309,13 +312,21 @@ def get_primer_set(name: str) -> tuple[str, str] | dict[str, str]:
             get_rc(primer_maps),
         )
     elif name == "recording_adapter":
-        return f"{RECORDING_PRIMER_5};rightmost...{RECORDING_PRIMER_3}"
+        return (
+            f"{RECORDING_PRIMER_5};rightmost;min_overlap={get_min_overlap(RECORDING_PRIMER_5, frac=0.5)}"
+            f"...{RECORDING_PRIMER_3};min_overlap={get_min_overlap(RECORDING_PRIMER_3, frac=0.5)}"
+        )
     elif name == "recording_leader_dr":
-        return ECREC_LEADER + ECREC_DR
+        ret = ECREC_LEADER + ECREC_DR
+        return ret + f";min_overlap={get_min_overlap(ret)}"
     elif name == "recording_spacer0":
-        return ECREC_SPACER0
+        return ECREC_SPACER0 + f";min_overlap={get_min_overlap(ECREC_SPACER0)};rightmost"
+    elif name == "recording_spacer0_rc":
+        return get_rc(ECREC_SPACER0) + f";min_overlap={get_min_overlap(ECREC_SPACER0)}"
     elif name == "recording_dr":
-        return ECREC_DR
+        return ECREC_DR + f";min_overlap={get_min_overlap(ECREC_DR)}"
+    elif name == "recording_dr_rc":
+        return get_rc(ECREC_DR) + f"X;min_overlap={get_min_overlap(ECREC_DR)}"
     else:
         raise ValueError(f"Invalid primer set name: {name}")
 
