@@ -929,12 +929,15 @@ def aggregate_samples(
     with open(input_json) as json_file:
         data = json.load(json_file)
 
-    # Extract unique sequences and calculate their total counts, ignoring "#UNKNOWN"
+    # Extract unique sequences and calculate their total counts, keeping track of "#UNKNOWN" separately
     sequence_counts = defaultdict(int)
     key_sequence_counts = defaultdict(lambda: defaultdict(int))
+    unknown_counts = defaultdict(int)
     for key, value in data.items():
         for sequence, count in zip(value["zotus"], value["counts"]):
-            if sequence != "#UNKNOWN":
+            if sequence == "#UNKNOWN":
+                unknown_counts[key] = count
+            else:
                 sequence_counts[sequence] += count
                 key_sequence_counts[key][sequence] = count
 
@@ -964,8 +967,17 @@ def aggregate_samples(
         for key in key_sequence_counts:
             df_data[key].append(key_sequence_counts[key].get(sequence, 0))
 
+    # Add #UNKNOWN to the DataFrame as the last row
+    if "#UNKNOWN" in unknown_counts:
+        index.append("#UNKNOWN")
+        for key in key_sequence_counts:
+            df_data[key].append(unknown_counts[key])
+        df_data[f"{prefix}_UNKNOWN"] = df_data.pop("#UNKNOWN")
+
     df = pd.DataFrame(df_data, index=index)
     df.index.name = "#OTU_ID"
+
+    # Save the DataFrame to a CSV file (optional)
     write_table(df, output_count)
 
 
