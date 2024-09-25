@@ -3,11 +3,27 @@ import argparse
 import subprocess
 import os
 
+import yaml
+
 import easy_amplicon
 
 
-RDP_CLASSIFIER_PATH: str = easy_amplicon.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
-print(RDP_CLASSIFIER_PATH)
+# RDP_CLASSIFIER_PATH: str = easy_amplicon.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
+# INFO_PATH = os.path.join(os.path.dirname(__file__), "setup/info.yaml")
+# with open(INFO_PATH) as f:
+#     info = yaml.safe_load(f)
+#     rdp_classifier_path = info["rdp_classifier_path"]
+#     if rdp_classifier_path is None:
+#         RDP_CLASSIFIER_PATH = (
+#             easy_amplicon.__path__[0]
+#             + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
+#         )
+#     else:
+#         RDP_CLASSIFIER_PATH = rdp_classifier_path
+RDP_CLASSIFIER_PATH = (
+    easy_amplicon.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
+)
+
 
 def main():
     """
@@ -52,9 +68,7 @@ def main():
         ret.returncode == 0
     ), f"rdp_classifier failed with return code {ret.returncode}"
 
-    ret = subprocess.run(
-        ["process_rrndb.py", "-i", raw_output_path, "-o", output_path]
-    )
+    ret = subprocess.run(["process_rrndb.py", "-i", raw_output_path, "-o", output_path])
     assert (
         ret.returncode == 0
     ), f"process_rrndb.py failed with return code {ret.returncode}"

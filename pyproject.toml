@@ -24,6 +24,7 @@ dependencies = [
     "dendropy>=5.0.1",
     "matplotlib>=3.9.2",
     "pyarrow>=17.0.0",
+    "pyyaml>=6.0.2",
 ]
 
 [project.scripts]
@@ -41,7 +42,10 @@ dependencies = [
 "utils_blast.py" = "easy_amplicon.utils_blast:main"
 "recording.py" = "easy_amplicon.read_processer.recording:main"
 "run_rdp_classifier.py" = "easy_amplicon.run_rdp_classifier:main"
-
+# setup scripts
+easy_amplicon_conda_install = "easy_amplicon.setup.conda_install:main"
+easy_amplicon_download_rdp = "easy_amplicon.setup.download_rdp:main"
+easy_amplicon_download_test_data = "easy_amplicon.setup.download_test_data:main"
 
 [build-system]
 requires = ["hatchling"]

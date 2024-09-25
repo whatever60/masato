@@ -1,0 +1,15 @@
+fastp
+trimmomatic
+trim-galore
+cutadapt
+seqkit
+samtools
+bwa-mem2
+mmseqs2
+mafft
+trimal
+raxml
+fasttree
+blast
+pigz
+vsearch

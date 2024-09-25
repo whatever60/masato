@@ -81,9 +81,9 @@ def plot_dm(
     df_meta: pd.DataFrame,
     fig_path: str,
     distance: str,
-    title: str = None,
-    hue: str = None,
-    style: str = None,
+    title: str | None = None,
+    hue: str | None = None,
+    style: str | None = None,
     annotate_dots: bool = False,
     plot_ellipses: bool = False,
 ) -> None:
