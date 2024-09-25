@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import sys
 import argparse
 import glob
 import io
@@ -14,7 +13,6 @@ from concurrent.futures import as_completed
 import json
 from collections import defaultdict
 
-import numpy as np
 import pandas as pd
 from loky import get_reusable_executor
 from Bio import SeqIO
@@ -22,7 +20,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from tqdm.auto import tqdm
 
-from utils import print_command, read_table, write_table
+from easy_amplicon.utils import read_table, write_table
 
 
 def merge_pairs(
@@ -128,7 +126,10 @@ def merge_pairs(
 
 
 def qc(
-    input_fastq: str, output_fasta: str = None, num_threads: int = 16, backend="vsearch"
+    input_fastq: str,
+    output_fasta: str | None = None,
+    num_threads: int = 16,
+    backend: str = "vsearch",
 ) -> str:
     """Output fasta is default to be modified from input fastq, but can be specified.
     For example, if input fastq file is /data/merged.fq.gz, then output fasta will be
@@ -824,7 +825,7 @@ def workflow_per_sample(
         where sequence names are just sequences themselves. Identical sequences appear
         only once.
     """
-    from utils import smart_open
+    from easy_amplicon.utils import smart_open
 
     current_sample = None
     fastq_for_current_sample = []
@@ -838,7 +839,7 @@ def workflow_per_sample(
         if num_threads > 1
         else None
     )
-    f = smart_open(input_fastq, "rt")
+    f = smart_open(input_fastq, "r")
     for entry in zip(f, f, f, f):
         # Parse the header line to extract the sample name
         header = entry[0]
@@ -1044,9 +1045,9 @@ def _cluster_unoise3(
     db_fasta: str,
     minsize: int,
     id_: float,
-    output_dir: str,
+    output_dir: str | None,
     num_threads: int,
-    backend="vsearch",
+    backend: str ="vsearch",
 ) -> None:
     if output_dir is None:
         output_dir = os.path.dirname(input_fastq)
@@ -1213,13 +1214,15 @@ def _cluster_unoise3(
 
 def tax_nbc(
     input_fasta: str,
-    db_fasta: str,
+    db_fasta: str | None,
     output_path: str,
     num_threads: str,
     backend: str = "rdp_classifier",
 ) -> None:
     if backend == "usearch":
-        subprocess.run(
+        if db_fasta is None:
+            raise ValueError("db_fasta is required when using usearch")
+        _ = subprocess.run(
             [
                 "usearch11",
                 "-nbc_tax",

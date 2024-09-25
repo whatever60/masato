@@ -16,8 +16,8 @@ import seaborn as sns
 
 # from tqdm.auto import tqdm
 
-from get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
-from plot_tree import (
+from easy_amplicon.get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
+from easy_amplicon.plot_tree import (
     get_taxonomy_tree,
     _calc_y,
     _get_node_label,
@@ -557,9 +557,10 @@ def rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
     )
 
 
-if __name__ == "__main__":
+def main():
+# if __name__ == "__main__":
 
-    matplotlib.use("TkAgg")
+    # matplotlib.use("TkAgg")
     plt.rcParams["pdf.fonttype"] = 42
 
     parser = argparse.ArgumentParser()
@@ -837,7 +838,6 @@ if __name__ == "__main__":
                     height_ratios=None,
                     orientation=orientation,
                 )
-                import pdb; pdb.set_trace()
                 _stacked_bar(
                     res_group_list,
                     names,

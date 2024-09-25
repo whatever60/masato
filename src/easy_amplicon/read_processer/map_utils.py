@@ -36,24 +36,24 @@ def map_se(
             f"bwa-mem2 mem -t {num_threads} {args}{reference_genome} {reads_fastq} "
             f"2> {bwa_log} | samtools view -S -b - | samtools sort -o {bam_file}"
         )
-        subprocess.run(align_cmd, shell=True, check=True)
+        _ = subprocess.run(align_cmd, shell=True, check=True)
 
         # Step 3: Index the sorted BAM file
         index_cmd = f"samtools index {bam_file}"
-        subprocess.run(index_cmd, shell=True, check=True)
+        _ = subprocess.run(index_cmd, shell=True, check=True)
 
         # Step 4: Extract unmapped reads
         extract_mapped_cmd = (
             f"samtools view -F 4 -b {bam_file} | samtools fastq - | pigz > {mapped_reads}"
         )
-        subprocess.run(
+        _ = subprocess.run(
             extract_mapped_cmd, shell=True, check=True, stderr=subprocess.DEVNULL
         )
 
         extract_unmapped_cmd = (
             f"samtools view -f 4 -b {bam_file} | samtools fastq - | pigz > {unmapped_reads}"
         )
-        subprocess.run(
+        _ = subprocess.run(
             extract_unmapped_cmd, shell=True, check=True, stderr=subprocess.DEVNULL
         )
 

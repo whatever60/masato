@@ -16,7 +16,7 @@ from Bio.Blast import NCBIWWW, NCBIXML
 from Bio import Entrez
 from tqdm import tqdm, trange
 
-from utils import print_command
+from easy_amplicon.utils import print_command
 
 
 def blast_online(
@@ -319,7 +319,8 @@ def _(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-i",

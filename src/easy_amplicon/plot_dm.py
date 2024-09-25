@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import seaborn as sns
 
-from get_abundance import get_otu_count, _agg_along_axis
+from easy_amplicon.get_abundance import get_otu_count, _agg_along_axis
 
 
 def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -215,12 +215,13 @@ def plot_dm(
     fig.savefig(os.path.splitext(fig_path)[0] + ".pdf", bbox_inches="tight")
 
 
-if __name__ == "__main__":
+def main():
+# if __name__ == "__main__":
     import argparse
 
     # configure matplotlib PDF saving to use text instead of vector graphics
     plt.rcParams["pdf.fonttype"] = 42
-    matplotlib.use("TkAgg")
+    # matplotlib.use("TkAgg")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(

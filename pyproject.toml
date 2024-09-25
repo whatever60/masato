@@ -1,0 +1,48 @@
+[project]
+name = "easy-amplicon"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "biom-format>=2.1.16",
+    "biopython>=1.84",
+    "ipykernel>=6.29.5",
+    "ipython>=8.27.0",
+    "ipywidgets>=8.1.5",
+    "loky>=3.4.1",
+    "pandas>=2.2.3",
+    "polars>=1.8.1",
+    "pytest>=8.3.3",
+    "pytest-console-scripts>=1.4.1",
+    "rich>=13.8.1",
+    "scikit-bio>=0.6.2",
+    "scikit-learn>=1.5.2",
+    "seaborn>=0.13.2",
+    "tqdm>=4.66.5",
+    "umi-tools>=1.1.5",
+    "dendropy>=5.0.1",
+    "matplotlib>=3.9.2",
+    "pyarrow>=17.0.0",
+]
+
+[project.scripts]
+"analysis.py" = "easy_amplicon.analysis:main"
+"analysis_sintax.py" = "easy_amplicon.analysis_sintax:main"
+"get_abundance.py" = "easy_amplicon.get_abundance:main"
+"get_tree.py" = "easy_amplicon.get_tree:main"
+"isolate_utils.py" = "easy_amplicon.isolate_utils:main"
+"plot.py" = "easy_amplicon.plot:main"
+"plot_dm.py" = "easy_amplicon.plot_dm:main"
+"process_nbc_tax.py" = "easy_amplicon.process_nbc_tax:main"
+"process_rrndb.py" = "easy_amplicon.process_rrndb:main"
+"trim.py" = "easy_amplicon.trim:main"
+"usearch_workflow.py" = "easy_amplicon.usearch_workflow:main"
+"utils_blast.py" = "easy_amplicon.utils_blast:main"
+"recording.py" = "easy_amplicon.read_processer.recording:main"
+"run_rdp_classifier.py" = "easy_amplicon.run_rdp_classifier:main"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -8,7 +8,7 @@ import argparse
 
 from Bio.Seq import Seq
 
-from utils import cat_fastq, cat_fastq_se, smart_open, print_command
+from easy_amplicon.utils import cat_fastq, cat_fastq_se, smart_open, print_command
 
 
 def get_rc(seq: str) -> str:
@@ -869,7 +869,8 @@ def rename_output_files(output_dir, pair):
         os.rename(r2_old, r2_new)
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Process and rename FASTQ files using trim_galore."
     )

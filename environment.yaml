@@ -4,22 +4,6 @@ channels:
   - bioconda
   - conda-forge
 dependencies:
-  - python=3.10
-  - pandas
-  - polars
-  - scikit-bio
-  - numpy
-  - biopython
-  - dendropy
-  - joblib
-  - matplotlib
-  - seaborn
-  - scikit-learn
-  - tqdm
-  - loky
-  - biom-format
-  - rich
-  - umi_tools
   - fastp
   - trimmomatic
   - trim-galore
@@ -35,6 +19,3 @@ dependencies:
   - blast
   - pigz
   - vsearch
-  - pip
-  - pip:
-    - -r requirements.txt

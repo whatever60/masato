@@ -42,7 +42,7 @@ import argparse
 import pandas as pd
 import polars as pl
 
-from utils import read_table, read_table
+from easy_amplicon.utils import read_table, read_table
 
 
 def _find_otus_by_taxon(df_tax: pd.DataFrame, taxon: str) -> list[str]:
@@ -470,7 +470,8 @@ def get_otu_count(
     return df_otu_count, df_meta, df_tax
 
 
-if __name__ == "__main__":
+def main():
+# if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # Arguments

@@ -1,4 +1,10 @@
 *.jpg
+.vscode
+tests/data
+dist
+notebooks/
+scripts/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -77,36 +77,36 @@ def parse_taxonomy_line(row):
 
     return pd.Series(result)
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", type=str)
+    parser.add_argument("output", type=str)
+    parser.add_argument("output_simple", type=str)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("input", type=str)
-parser.add_argument("output", type=str)
-parser.add_argument("output_simple", type=str)
+    args = parser.parse_args()
+    input_path = args.input
+    output_path = args.output
+    output_simple_path = args.output_simple
 
-args = parser.parse_args()
-input_path = args.input
-output_path = args.output
-output_simple_path = args.output_simple
+    # Load the data from the tsv
+    df = pd.read_csv(
+        input_path,
+        sep="\t",
+        names=["otu", "prob", "strand", "assign"],
+    )
 
-# Load the data from the tsv
-df = pd.read_csv(
-    input_path,
-    sep="\t",
-    names=["otu", "prob", "strand", "assign"],
-)
+    # Process each row
+    df_res = df.apply(parse_taxonomy_line, axis=1)
+    df_res.to_csv(
+        output_path,
+        sep="\t",
+        index=False,
+    )
 
-# Process each row
-df_res = df.apply(parse_taxonomy_line, axis=1)
-df_res.to_csv(
-    output_path,
-    sep="\t",
-    index=False,
-)
-
-df_res = df_res[["otu", "genus_conf", "family_conf"]].dropna()
-df_res.columns = ["otu", "genus", "family"]
-df_res.to_csv(
-    output_simple_path,
-    sep="\t",
-    index=False,
-)
+    df_res = df_res[["otu", "genus_conf", "family_conf"]].dropna()
+    df_res.columns = ["otu", "genus", "family"]
+    df_res.to_csv(
+        output_simple_path,
+        sep="\t",
+        index=False,
+    )

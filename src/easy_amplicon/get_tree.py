@@ -5,13 +5,16 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import Iterable
 
 from Bio import SeqIO
-from Bio import Phylo
+from Bio import SeqRecord
 
 
 # Reading the FASTA file and filtering sequences
-def filter_sequences(input_fasta, names_to_keep):
+def filter_sequences(
+    input_fasta: str, names_to_keep: list[str]
+) -> Iterable[SeqRecord.SeqRecord]:
     for record in SeqIO.parse(input_fasta, "fasta"):
         if record.id in names_to_keep:
             yield record
@@ -20,7 +23,7 @@ def filter_sequences(input_fasta, names_to_keep):
 # Function to run MAFFT
 def run_mafft(input_fasta: str):
     # MAFFT command
-    mafft_cmd = [f"{os.path.dirname(sys.executable)}/mafft", "--auto", input_fasta]
+    mafft_cmd = ["mafft", "--auto", input_fasta]
     return subprocess.run(mafft_cmd, capture_output=True, text=True)
 
 
@@ -28,7 +31,7 @@ def run_trimal(input_aln: str, output_phy: str, tree_method: str = "raxml"):
     # trimal command
     if tree_method == "raxml":
         trimal_cmd = [
-            f"{os.path.dirname(sys.executable)}/trimal",
+            "trimal",
             "-in",
             input_aln,
             "-phylip",
@@ -38,7 +41,7 @@ def run_trimal(input_aln: str, output_phy: str, tree_method: str = "raxml"):
     else:
         # output fasta
         trimal_cmd = [
-            f"{os.path.dirname(sys.executable)}/trimal",
+            "trimal",
             "-in",
             input_aln,
             "-out",
@@ -51,7 +54,7 @@ def run_trimal(input_aln: str, output_phy: str, tree_method: str = "raxml"):
 def run_raxml(alignment_file: str, output_dir: str):
     # RAxML command
     raxml_cmd = [
-        f"{os.path.dirname(sys.executable)}/raxmlHPC-PTHREADS-SSE3",
+        "raxmlHPC-PTHREADS-SSE3",
         "-s",
         alignment_file,
         "-m",
@@ -75,12 +78,12 @@ def run_raxml(alignment_file: str, output_dir: str):
 
 
 def run_fasttree(alignment_file: str, output_tree: str):
-    """Run FastTre on nucleotide alignment file and save the tree by taking input from 
+    """Run FastTre on nucleotide alignment file and save the tree by taking input from
     stdin and redirecting stdout to a file.
     """
     # FastTree command
     fasttree_cmd = [
-        f"{os.path.dirname(sys.executable)}/FastTree",
+        "FastTree",
         "-nt",
         "-gtr",
     ]
@@ -105,8 +108,8 @@ def process_sequences(
         # ) as temp_fasta:
         temp_fasta = tempfile.NamedTemporaryFile(mode="w", suffix=".fasta")
         # Filter and write sequences to a temp file
-        SeqIO.write(
-            filter_sequences(zotu_fasta_path, seq_names),
+        _ = SeqIO.write(
+            list(filter_sequences(zotu_fasta_path, seq_names)),
             temp_fasta,
             "fasta",
         )
@@ -144,7 +147,10 @@ def process_sequences(
             print("Error in running RAxML:", raxml_result.stderr)
             return 1
         else:
-            print("RAxML completed successfully. Tree saved in Newick format as:", tree_out)
+            print(
+                "RAxML completed successfully. Tree saved in Newick format as:",
+                tree_out,
+            )
             shutil.copy(tree_file, tree_out)
     elif tree_method == "fasttree":
         fasttree_result = run_fasttree(alignment_out, tree_out)
@@ -165,11 +171,12 @@ def process_sequences(
     return 0
 
 
-if __name__ == "__main__":
+def main() -> None:
+    # if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate a phylogenetic tree from a FASTA file of sequences and a list of sequence names"
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "-i",
         "--input_fasta",
         help="Input FASTA file",
@@ -177,7 +184,7 @@ if __name__ == "__main__":
         type=str,
         metavar="FASTA",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "-m",
         "--tree_method",
         help="Method to generate the tree",

@@ -57,7 +57,8 @@ def parse_taxonomy_line(row):
     return pd.Series(result)
 
 
-if __name__ == "__main__":
+def main():
+# if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str)
     parser.add_argument("-o", "--output", type=str)

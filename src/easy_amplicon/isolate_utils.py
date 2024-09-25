@@ -7,8 +7,8 @@ import glob
 import numpy as np
 import pandas as pd
 
-from get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
-from utils import write_table
+from easy_amplicon.get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
+from easy_amplicon.utils import write_table
 
 
 def _read_isolate_metadata(isolate_metadata_dir: str) -> pd.DataFrame:
@@ -321,7 +321,8 @@ def quality_control(
     ).astype(int)
 
 
-if __name__ == "__main__":
+def main():
+# if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Utility functions for processing isolate metadata"
     )
