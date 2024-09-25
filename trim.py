@@ -20,6 +20,8 @@ PRIMER_ITS_5 = "GTACCTGCGGARGGATCA"
 PRIMER_ITS_7 = "ATGAGATCCRTTGYTRAAAGTT"
 PRIMER_16S_5 = "GTGTGYCAGCMGCCGCGGTAA"
 PRIMER_16S_7 = "CCGGACTACNVGGGTWTCTAAT"
+PRIMER_16S_V3V4_341F = "CCTACGGGNGGCWGCAG"
+PRIMER_16S_V3V4_805R = "GACTACHVGGGTATCTAATCC"
 PRIMER_TN5 = "AGATGTGTATAAGAGACAG"
 # PRIMER_MAPS_0 = "GCGAGACACTGCTGAGCG"
 # PRIMER_MAPS_1 = "GTCACTCCAGCCTCGTCG"
@@ -98,7 +100,7 @@ def run_trimmomatic(input_fastq_1: str, input_fastq_2: str, output_dir: str) -> 
 
 def run_fastp(
     input_fastq_1: str, input_fastq_2: str, output_dir: str, stdout: bool = False
-) -> None:
+) -> subprocess.Popen[bytes]:
     output_fastq_1 = os.path.join(output_dir, os.path.basename(input_fastq_1))
     output_fastq_2 = os.path.join(output_dir, os.path.basename(input_fastq_2))
     output_fastq_1_unpaired = output_fastq_1.replace(".fastq", ".fastp.unpaired.fastq")
@@ -162,7 +164,7 @@ def run_fastp(
 def run_fastp_cutadapt(
     input_fastq_1: str,
     input_fastq_2: str,
-    output_dir: str = None,
+    output_dir: str,
     amplicon_type: str = "ITS",
 ):
     """Quality trimming and filtering by fastp, then adapter trimming by cutadapt.
@@ -170,14 +172,14 @@ def run_fastp_cutadapt(
         also from the 3' end. Just trim and save report, no need to separate trimmed
         and untrimmed reads or discard reads.
     """
-    output_fastq_1 = os.path.join(output_dir, os.path.basename(input_fastq_1))
-    output_fastq_2 = os.path.join(output_dir, os.path.basename(input_fastq_2))
-    report_report = os.path.join(output_dir, "cutadapt.report.json")
-    if not amplicon_type in ["ITS", "16S"]:
+    output_fastq_1: str = os.path.join(output_dir, os.path.basename(input_fastq_1))
+    output_fastq_2: str = os.path.join(output_dir, os.path.basename(input_fastq_2))
+    report_report: str = os.path.join(output_dir, "cutadapt.report.json")
+    if amplicon_type not in ["ITS", "16S"]:
         raise ValueError("amplicon_type must be either ITS or 16S.")
 
     fastp_proc = run_fastp(input_fastq_1, input_fastq_2, output_dir, stdout=True)
-    subprocess.run(
+    _ = subprocess.run(
         [
             "cutadapt",
             "-a",
@@ -273,9 +275,9 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
     os.chdir(original_dir)
 
 
-def get_primer_set(name: str) -> tuple[str, str] | dict[str, str]:
-    def get_min_overlap(adapter: str, frac: float=0.8) -> int:
-        return int(len(adapter) * 0.8)
+def get_primer_set(name: str) -> tuple[str, str | None] | dict[str, str] | str:
+    def get_min_overlap(adapter: str, frac: float = 0.8) -> int:
+        return int(len(adapter) * frac)
 
     if name == "its":
         return (
@@ -320,7 +322,9 @@ def get_primer_set(name: str) -> tuple[str, str] | dict[str, str]:
         ret = ECREC_LEADER + ECREC_DR
         return ret + f";min_overlap={get_min_overlap(ret)}"
     elif name == "recording_spacer0":
-        return ECREC_SPACER0 + f";min_overlap={get_min_overlap(ECREC_SPACER0)};rightmost"
+        return (
+            ECREC_SPACER0 + f";min_overlap={get_min_overlap(ECREC_SPACER0)};rightmost"
+        )
     elif name == "recording_spacer0_rc":
         return get_rc(ECREC_SPACER0) + f";min_overlap={get_min_overlap(ECREC_SPACER0)}"
     elif name == "recording_dr":
@@ -693,6 +697,7 @@ def cutadapt_merge_trim_se(
     primer_set: str,
     first_k: int = None,
     min_length: int = None,
+    _r2: bool = False,
 ) -> None:
     output_dir, output_f = os.path.split(output_fastq)
     os.makedirs(output_dir, exist_ok=True)
@@ -727,12 +732,41 @@ def cutadapt_merge_trim_se(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        cat_fastq_se(fastq_path, output_fp=cutadapt_trim_proc.stdin)
+        cat_fastq_se(fastq_path, output_fp=cutadapt_trim_proc.stdin, _r2=_r2)
         cutadapt_trim_proc.stdin.close()
         cutadapt_trim_proc.wait()
     else:
         proc_args.append(fastq_path)
         subprocess.run(proc_args)
+
+
+def extract_r2_16s_v3v4(fastq_dir: str, output_fastq: str) -> None:
+    length = 150
+    output_dir, output_f = os.path.split(output_fastq)
+    os.makedirs(output_dir, exist_ok=True)
+    log_dir = os.path.join(output_dir, "fastp")
+    args = (
+        f"fastp -w 8 "
+        f"--length_required {length} "
+        f"--cut_right "
+        f"--stdin "
+        f"--stdout "
+        f"--json {log_dir}/report.json "
+        f"--html {log_dir}/report.html "
+        f"| seqkit seq -rp "
+        f"| cutadapt -o {output_fastq} -l {length} -"
+    )
+    print_command(args)
+    preprocess_proc = subprocess.Popen(
+        args,
+        shell=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    cat_fastq_se(fastq_dir, output_fp=preprocess_proc.stdin, _r2=True)
+    preprocess_proc.stdin.close()
+    preprocess_proc.wait()
 
 
 def merge(fastq_dir: str, output_dir: str) -> None:

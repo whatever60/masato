@@ -201,6 +201,7 @@ def cat_fastq_se(
     metadata: str = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
+    _r2: bool = False,
 ):
     """Similar as above but simply list all fastq/fq/fastq.gz/fq.gz files in the
     directory and concatenate them into a single file with new read names. Good for
@@ -223,8 +224,12 @@ def cat_fastq_se(
                 if read_type not in ["R1", "R2"]:
                     warnings.warn(f"Invalid read type for file: {file_}")
                     continue
-                if read_type == "R2":
-                    continue
+                if _r2:
+                    if read_type == "R1":
+                        continue
+                else:
+                    if read_type == "R2":
+                        continue
                 files.append((file_, sample_name, read_type))
                 break
 
@@ -340,7 +345,9 @@ def read_table(
             method = pd.read_table
         else:
             raise ValueError("Unsupported table file format.")
-        return method(table_path, index_col=index_col, comment=comment)
+        return method(
+            table_path, index_col=index_col, comment=comment, dtype={index_col: str}
+        )
 
 
 def write_table(table: pd.DataFrame, table_path: str) -> None:

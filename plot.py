@@ -837,6 +837,7 @@ if __name__ == "__main__":
                     height_ratios=None,
                     orientation=orientation,
                 )
+                import pdb; pdb.set_trace()
                 _stacked_bar(
                     res_group_list,
                     names,

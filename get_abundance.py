@@ -361,7 +361,7 @@ def read_tables(
                     "missing from OTU count table:"
                 )
                 print("\t", end="")
-                print(", ".join(sorted(missing_samples)))
+                print(", ".join(map(str, sorted(missing_samples))))
                 print("Filling in missing samples with all zero counts.")
             df_otu_count = pd.concat(
                 [

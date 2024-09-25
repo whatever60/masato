@@ -681,7 +681,7 @@ def search_global(
         stdout=stdout,
         stderr=stderr,
     )
-    sg_proc_out, _ = sg_proc.communicate(
+    sg_proc_out, sg_proc_err = sg_proc.communicate(
         input_fastq.encode() if stdin is subprocess.PIPE else None
     )
     if stdout is subprocess.PIPE:
@@ -729,6 +729,7 @@ def _decide_io_arg(arg) -> tuple:
         if "\n" in arg:  # string literal corresponding to file content
             return "-", subprocess.PIPE
         else:  # file path
+            arg = os.path.abspath(arg)
             if (
                 not os.path.isfile(arg)
                 and not os.path.isdir(arg)
