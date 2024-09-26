@@ -111,4 +111,3 @@ def test_plot_alpha_diversity(script_runner, test_data_dir, amplicon_type, level
     assert ret.success, f"Script failed with return code {ret.returncode}"
     # output_file = fig_dir / f"alpha_diversity_{'rarefying_' if rarefying else ''}{amplicon_type}.png"
     # assert output_file.exists(), f"Output file not created: {output_file}"
-

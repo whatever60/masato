@@ -3,6 +3,7 @@ trimmomatic
 trim-galore
 cutadapt
 seqkit
+seqtk
 samtools
 bwa-mem2
 mmseqs2
@@ -13,3 +14,4 @@ fasttree
 blast
 pigz
 vsearch
+gappa

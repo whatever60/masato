@@ -268,8 +268,15 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
     os.chdir(file_dir)
 
     # Step 3: Execute the mmv command
-    with open(patterns_file_abs, "r") as file:
-        subprocess.run(["mmv", "-d"], stdin=file)
+    # with open(patterns_file_abs) as file:
+    #     subprocess.run(["mmv", "-d"], stdin=file)
+    with open(patterns_file_abs) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            old_name, new_name = line.split()
+            subprocess.run(["mv", old_name, new_name])
 
     # Step 4: Change back to the original directory
     os.chdir(original_dir)
@@ -945,11 +952,32 @@ def main():
     if args.mode == "simple":
         simple_preprocess(args.input_dir, args.output)
     elif args.mode == "isolate_150":
+        # for barcode_fwd, barcode_rev and pattern, first look for them as if they are 
+        # normal file path, if not exist, then look for them in script_dir/../../data
+        if args.barcode_fwd is not None and not os.path.isfile(args.barcode_fwd):
+            barcode_fwd = os.path.join(
+                os.path.dirname(__file__), "data", args.barcode_fwd
+            )
+        else:
+            barcode_fwd = args.barcode_fwd
+        if args.barcode_rev is not None and not os.path.isfile(args.barcode_rev):
+            barcode_rev = os.path.join(
+                os.path.dirname(__file__), "data", args.barcode_rev
+            )
+        else:
+            barcode_rev = args.barcode_rev
+        if args.pattern is not None and not os.path.isfile(args.pattern):
+            pattern = os.path.join(
+                os.path.dirname(__file__), "data", args.pattern
+            )
+        else:
+            pattern = args.pattern
+
         isolate_150_preprocess(
             args.input_dir,
-            args.barcode_fwd,
-            args.barcode_rev,
-            args.pattern,
+            barcode_fwd,
+            barcode_rev,
+            pattern,
             args.output,
             primer_set=args.primer_set,
             first_k=args.first_k,

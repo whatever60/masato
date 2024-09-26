@@ -88,10 +88,9 @@ def plot_dm(
     plot_ellipses: bool = False,
 ) -> None:
     if distance == "braycurtis":
-        pc_obj = pcoa(
-            beta_diversity("braycurtis", df_otu_count),
-            number_of_dimensions=min(10, *df_otu_count.shape),
-        )
+        bd = beta_diversity("braycurtis", df_otu_count)
+        dist_mtx = np.nan_to_num(bd.data, 0)
+        pc_obj = pcoa(dist_mtx, number_of_dimensions=min(10, *df_otu_count.shape))
         pc = pc_obj.samples.copy()
         pc.index = df_otu_count.index
         variance = pc_obj.proportion_explained.to_numpy()
@@ -216,7 +215,7 @@ def plot_dm(
 
 
 def main():
-# if __name__ == "__main__":
+    # if __name__ == "__main__":
     import argparse
 
     # configure matplotlib PDF saving to use text instead of vector graphics

@@ -6,18 +6,20 @@ where the requirement file is in the root of the package. (This file in /src/eas
 
 import argparse
 import subprocess
+import os
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--flavor", type=str, default="conda", choices=["conda", "mamba"])
     args = parser.parse_args()
     flavor = args.flavor
+    requirement_file = f"{os.path.dirname(__file__)}/../data/conda_requirements.txt"
     ret = subprocess.run(
         [
             flavor,
             "install",
             "--file",
-            "conda_requirements.txt",
+            requirement_file,
             "-c",
             "defaults",
             "-c",

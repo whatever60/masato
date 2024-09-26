@@ -562,6 +562,7 @@ def main():
 
     # matplotlib.use("TkAgg")
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams['svg.fonttype'] = 'none'
 
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
