@@ -853,7 +853,7 @@ def main():
                     dpi=300,
                 )
                 fig.savefig(
-                    f"{fig_dir}/rel_ab_group_{level}_sb.pdf",
+                    f"{fig_dir}/rel_ab_group_{level}_sb.svg",
                     bbox_inches="tight",
                     dpi=300,
                 )
@@ -1008,7 +1008,7 @@ def main():
                         dpi=300,
                     )
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hm{'l' if plot_type == 'heatmap_log10' else ''}.pdf",
+                        f"{fig_dir}/rel_ab_group_{level}_hm{'l' if plot_type == 'heatmap_log10' else ''}.svg",
                         bbox_inches="tight",
                         dpi=300,
                     )
@@ -1050,7 +1050,7 @@ def main():
                 #         dpi=300,
                 #     )
                 #     fig.savefig(
-                #         f"{fig_dir}/rel_ab_group_{level}_hm.pdf",
+                #         f"{fig_dir}/rel_ab_group_{level}_hm.svg",
                 #         bbox_inches="tight",
                 #         dpi=300,
                 #     )
@@ -1097,7 +1097,7 @@ def main():
                         dpi=300,
                     )
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hmb.pdf",
+                        f"{fig_dir}/rel_ab_group_{level}_hmb.svg",
                         bbox_inches="tight",
                         dpi=300,
                     )
@@ -1192,7 +1192,7 @@ def main():
                         dpi=300,
                     )
                     fig.savefig(
-                        f"{fig_dir}/rel_ab_group_{level}_hmr.pdf",
+                        f"{fig_dir}/rel_ab_group_{level}_hmr.svg",
                         bbox_inches="tight",
                         dpi=300,
                     )

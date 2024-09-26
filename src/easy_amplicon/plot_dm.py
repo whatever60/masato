@@ -211,7 +211,7 @@ def plot_dm(
     # fig.tight_layout()
     fig.savefig(fig_path, dpi=300, bbox_inches="tight")
     # also save a pdf file
-    fig.savefig(os.path.splitext(fig_path)[0] + ".pdf", bbox_inches="tight")
+    fig.savefig(os.path.splitext(fig_path)[0] + ".svg", bbox_inches="tight")
 
 
 def main():
@@ -220,6 +220,7 @@ def main():
 
     # configure matplotlib PDF saving to use text instead of vector graphics
     plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams['svg.fonttype'] = 'none'
     # matplotlib.use("TkAgg")
 
     parser = argparse.ArgumentParser()
