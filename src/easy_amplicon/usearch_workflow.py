@@ -978,7 +978,6 @@ def aggregate_samples(
         # df_data[f"{prefix}_UNKNOWN"] = df_data.pop("#UNKNOWN")
 
     df = pd.DataFrame(df_data, index=index)
-    import pdb; pdb.set_trace()
     df.index.name = "#OTU_ID"
 
     # Save the DataFrame to a CSV file (optional)

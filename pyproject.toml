@@ -12,7 +12,6 @@ dependencies = [
     "ipywidgets>=8.1.5",
     "loky>=3.4.1",
     "pandas>=2.2.3",
-    "polars>=1.8.1",
     "pytest>=8.3.3",
     "pytest-console-scripts>=1.4.1",
     "rich>=13.8.1",
@@ -25,6 +24,7 @@ dependencies = [
     "matplotlib>=3.9.2",
     "pyarrow>=17.0.0",
     "pyyaml>=6.0.2",
+    "polars-lts-cpu>=1.8.2",
 ]
 
 [project.scripts]

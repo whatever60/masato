@@ -13,9 +13,9 @@ def test_data_dir():
 @pytest.fixture
 def barcodes_files():
     return {
-        "barcodes_fwd": "data/isolate/barcodes_fwd.fasta",
-        "barcodes_rev": "data/isolate/barcodes_rev.fasta",
-        "patterns": "data/isolate/patterns.txt",
+        "barcodes_fwd": "isolate/barcodes_fwd.fasta",
+        "barcodes_rev": "isolate/barcodes_rev.fasta",
+        "patterns": "isolate/patterns.txt",
     }
 
 
@@ -49,12 +49,6 @@ def test_trim(
         barcodes_fwd = barcodes_files["barcodes_fwd"]
         barcodes_rev = barcodes_files["barcodes_rev"]
         patterns = barcodes_files["patterns"]
-
-        # Ensure that these files exist for the test
-        assert Path(barcodes_fwd).exists(), f"File not found: {barcodes_fwd}"
-        assert Path(barcodes_rev).exists(), f"File not found: {barcodes_rev}"
-        assert Path(patterns).exists(), f"File not found: {patterns}"
-
         extra_args = ["-fb", barcodes_fwd, "-rb", barcodes_rev, "-pt", patterns]
 
     # Run the script

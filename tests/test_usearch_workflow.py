@@ -99,13 +99,13 @@ def test_usearch_workflow(script_runner, test_data_dir, amplicon_type, prefix):
         str(input_file),
         "-o",
         str(json_output_file),
-        "-l",
-        "whatever",
+        # "-l",
+        # "whatever",
         "--search",
     ]
 
     # Run the first command
-    ret_workflow_per_sample = script_runner.run(*cmd_workflow_per_sample)
+    ret_workflow_per_sample = script_runner.run(cmd_workflow_per_sample)
 
     # Assertions for the first command
     assert (
