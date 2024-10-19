@@ -5,6 +5,7 @@ import gzip
 import shutil
 from glob import glob
 from collections import Counter
+import tempfile
 
 import pandas as pd
 from Bio import Seq, SeqIO
@@ -21,7 +22,7 @@ from easy_amplicon.trim import (
     ECREC_SPACER0,
 )
 from easy_amplicon.utils import print_command, smart_open, find_paired_end_files
-from easy_amplicon.map_utils import map_se
+from easy_amplicon.read_processer.map_utils import map_se
 
 
 def fastp_merge(sample: str, read1: str, read2: str, output_dir: str, cpus: int):
@@ -206,7 +207,7 @@ def cutadapt_fix_1(
     adapter: str,  # 3' adapter of read 1
     e: int | float = 0.15,
     cores: int,
-    min_length: int = None,
+    min_length: int | None = None,
 ):
     """Some of reads cannot be merged, likely long amplicons. Here we merge them by
     trimming rightmost DR sequence from 3' end in retain mode. Later we will directly
@@ -289,12 +290,12 @@ def cutadapt_fix_2(
     output1: str,
     output2: str,
     *,
-    log_file: str = None,
+    log_file: str | None = None,
     # adapter1: str,  # 3' adapter of read 1
     adapter2: str,  # 3' adapter of read 2
     e: int | float = 0.15,
     cores: int,
-    min_length: int = None,
+    min_length: int | None = None,
 ):
     [
         os.makedirs(os.path.dirname(f), exist_ok=True)
@@ -356,7 +357,7 @@ def cutadapt_remove_nonedited(
     output1: str,
     output2: str,
     *,
-    log_file: str = None,
+    log_file: str | None = None,
     adapter: str,
     cpus: int,
 ):
@@ -405,8 +406,8 @@ def process_one_sample(sample: str, read1: str, read2: str, output_dir: str, cpu
     )
 
     # Merge pairs and remove adapters
-    log_dir = f"{merge_dir}/log"
-    output_md = f"{merge_dir}/merged_direct/{sample}.fq.gz"
+    # log_dir = f"{merge_dir}/log"
+    # output_md = f"{merge_dir}/merged_direct/{sample}.fq.gz"
     fastp_merge(
         sample,
         # read1=read1,
@@ -565,23 +566,24 @@ def process_one_sample(sample: str, read1: str, read2: str, output_dir: str, cpu
         mmseqs2_log = f"{output_dir}/spacer{k}/log/{sample}.clust.err"
         mmseqs2_out = f"{output_dir}/spacer{k}/log/{sample}.clust.out"
         os.makedirs(os.path.dirname(mmseqs2_prefix), exist_ok=True)
-        mmseqs_cmd = [
-            "mmseqs",
-            "easy-cluster",
-            output_spacer,
-            mmseqs2_prefix,
-            "temp",
-            "--min-seq-id",
-            "0.95",
-            "-c",
-            "0.8",
-            "--cov-mode",
-            "1",
-            "--remove-tmp-files",
-        ]
-        print_command(mmseqs_cmd)
-        with open(mmseqs2_log, "w") as log, open(mmseqs2_out, "w") as out:
-            subprocess.run(mmseqs_cmd, stderr=log, stdout=out)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mmseqs_cmd = [
+                "mmseqs",
+                "easy-cluster",
+                output_spacer,
+                mmseqs2_prefix,
+                temp_dir,
+                "--min-seq-id",
+                "0.95",
+                "-c",
+                "0.8",
+                "--cov-mode",
+                "1",
+                "--remove-tmp-files",
+            ]
+            print_command(mmseqs_cmd)
+            with open(mmseqs2_log, "w") as log, open(mmseqs2_out, "w") as out:
+                subprocess.run(mmseqs_cmd, stderr=log, stdout=out)
 
 
 def all_sequences_empty(fastq_file: str) -> bool:
@@ -717,6 +719,8 @@ def collect_spacers(
             with gzip.open(spacer_path, "rt") as f_in:
                 for record in SeqIO.parse(f_in, "fastq"):
                     if record.id in good_reads:
+                        # add order to the read name as another :<order>
+                        record.id = f"{record.id}:{spacer_order}"
                         SeqIO.write(record, f_out, "fastq")
 
 
@@ -774,14 +778,13 @@ def get_fastq_length(file_path: str) -> int:
 
 # if __name__ == "__main__":
 def main():
-
     # data_dir = "/mnt/c/aws_data/20240701_yuanyuan_recording/read_process"
     # fastq_dir = "/mnt/c/aws_data/20240701_yuanyuan_recording/fastq_raw"
     # ref_genome = "/mnt/c/aws_data/20240701_yuanyuan_recording/ref/ecoli_bl21_prec.fna"
 
     parser = argparse.ArgumentParser(description="Process some directories and files.")
     parser.add_argument(
-        "--data_dir", type=str, required=True, help="Path to the data directory"
+        "--output_dir", type=str, required=True, help="Path to the data directory"
     )
     parser.add_argument(
         "--fastq_dir", type=str, required=True, help="Path to the fastq directory"
@@ -796,18 +799,19 @@ def main():
 
     args = parser.parse_args()
 
-    data_dir = args.data_dir
+    output_dir = args.output_dir
     fastq_dir = args.fastq_dir
     ref_genome = args.ref_genome
     quiet = args.quiet
 
     if quiet:
+        global print_command
 
         def print_command(*args, **kwargs):
             return None
 
     bar = tqdm(find_paired_end_files(fastq_dir))
-    for read1, read2, sample in bar:
+    for i, (read1, read2, sample) in enumerate(bar):
         if "Undetermined" in sample:
             continue
         bar.set_description(sample)
@@ -819,7 +823,7 @@ def main():
             # read2=glob(f"{fastq_dir}/{sample}_S*_L001_R2_001.fastq.gz")[0],
             read1=read1,
             read2=read2,
-            output_dir=data_dir,
+            output_dir=output_dir,
             cpus=4,
         )
 
@@ -827,20 +831,25 @@ def main():
         rprint(
             "[bold green]Collecting spacer information and correcting UMI..[/bold green]"
         )
-        spacer_info_path = f"{data_dir}/collect_spacers/spacer_info/{sample}.tsv"
-        df_data = collect_spacer_info(data_dir, sample)
+        spacer_info_path = f"{output_dir}/collect_spacers/spacer_info/{sample}.tsv"
+        os.makedirs(os.path.dirname(spacer_info_path), exist_ok=True)
+        df_data = collect_spacer_info(output_dir, sample)
+        if df_data.num_spacers.max() == 0:
+            print(f"WARNING: No spacers found in {sample}, skipping mapping")
+            df_data.to_csv(spacer_info_path, sep="\t")
+            continue
         read2umi_corrected = correct_umi(df_data)
         df_data["umi_corrected"] = df_data.index.map(read2umi_corrected)
         # save spacer info
-        os.makedirs(os.path.dirname(spacer_info_path), exist_ok=True)
         df_data.to_csv(spacer_info_path, sep="\t")
 
         # ==================================
         rprint("[bold green]Collecting spacer sequences..[/bold green]")
-        output_path = f"{data_dir}/collect_spacers/spacer/{sample}.fq.gz"
+        df_data = pd.read_table(spacer_info_path, index_col=0)
+        output_path = f"{output_dir}/collect_spacers/spacer/{sample}.fq.gz"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         collect_spacers(
-            df_data=df_data, data_dir=data_dir, output_path=output_path, sample=sample
+            df_data=df_data, data_dir=output_dir, output_path=output_path, sample=sample
         )
 
         # ==================================
@@ -850,101 +859,101 @@ def main():
         )
         makedirs(
             *[
-                f"{data_dir}/collect_spacers/{i}"
+                f"{output_dir}/collect_spacers/{i}"
                 for i in ["map", "self", "other", "log"]
             ]
         )
         map_se(
-            f"{data_dir}/collect_spacers/spacer/{sample}.fq.gz",
+            f"{output_dir}/collect_spacers/spacer/{sample}.fq.gz",
             ref_genome,
-            bam_file=f"{data_dir}/collect_spacers/map/{sample}.bam",
-            bwa_log=f"{data_dir}/collect_spacers/log/{sample}.bwa.log",
-            mapped_reads=f"{data_dir}/collect_spacers/self/{sample}.fq.gz",
-            unmapped_reads=f"{data_dir}/collect_spacers/other/{sample}.fq.gz",
+            bam_file=f"{output_dir}/collect_spacers/map/{sample}.bam",
+            bwa_log=f"{output_dir}/collect_spacers/log/{sample}.bwa.log",
+            mapped_reads=f"{output_dir}/collect_spacers/self/{sample}.fq.gz",
+            unmapped_reads=f"{output_dir}/collect_spacers/other/{sample}.fq.gz",
         )
 
         # ==================================
-        ref_genome = (
-            "/mnt/c/aws_data/20240701_yuanyuan_recording/ref/escherichia_others.fna"
-        )
-        makedirs(
-            *[
-                f"{data_dir}/collect_spacers/{i}"
-                for i in ["map_e", "self_no_e", "other_no_e", "other_is_e", "log"]
-            ]
-        )
-        map_se(
-            f"{data_dir}/collect_spacers/other/{sample}.fq.gz",
-            ref_genome,
-            bam_file=f"{data_dir}/collect_spacers/map_e/{sample}.bam",
-            bwa_log=f"{data_dir}/collect_spacers/log/{sample}.bwa_e.log",
-            mapped_reads=f"{data_dir}/collect_spacers/other_no_e/{sample}.fq.gz",
-            unmapped_reads=f"{data_dir}/collect_spacers/other_is_e/{sample}.fq.gz",
-        )
+        # ref_genome = (
+        #     "/mnt/c/aws_data/20240701_yuanyuan_recording/ref/escherichia_others.fna"
+        # )
+        # makedirs(
+        #     *[
+        #         f"{output_dir}/collect_spacers/{i}"
+        #         for i in ["map_e", "self_no_e", "other_no_e", "other_is_e", "log"]
+        #     ]
+        # )
+        # map_se(
+        #     f"{output_dir}/collect_spacers/other/{sample}.fq.gz",
+        #     ref_genome,
+        #     bam_file=f"{output_dir}/collect_spacers/map_e/{sample}.bam",
+        #     bwa_log=f"{output_dir}/collect_spacers/log/{sample}.bwa_e.log",
+        #     mapped_reads=f"{output_dir}/collect_spacers/other_no_e/{sample}.fq.gz",
+        #     unmapped_reads=f"{output_dir}/collect_spacers/other_is_e/{sample}.fq.gz",
+        # )
 
         # ==================================
-        rprint("[bold green]BLSATing non-self to plasmid database")
-        plasmid_db = (
-            "/mnt/c/aws_data/20240701_yuanyuan_recording/db/PlasmidDatabaseJan18.db"
-        )
-        subprocess.run(
-            [
-                "seqkit",
-                "fq2fa",
-                f"{data_dir}/collect_spacers/other/{sample}.fq.gz",
-                "-o",
-                f"{data_dir}/collect_spacers/other/{sample}.fa",
-            ]
-        )
-        os.makedirs(f"{data_dir}/collect_spacers/other_blastn_plasmid", exist_ok=True)
-        subprocess.run(
-            [
-                "blastn",
-                "-query",
-                f"{data_dir}/collect_spacers/other/{sample}.fa",
-                "-db",
-                plasmid_db,
-                "-task",
-                "megablast",
-                "-word_size",
-                "10",
-                "-perc_identity",
-                "95",
-                "-dust",
-                "yes",
-                "-evalue",
-                "1e-2",
-                "-max_target_seqs",
-                "10000",
-                "-num_threads",
-                "16",
-                "-out",
-                f"{data_dir}/collect_spacers/other_blastn_plasmid/{sample}.out",
-                "-outfmt",
-                "6 qseqid qlen sseqid pident length qstart qend sstart send evalue bitscore slen staxids",
-            ]
-        )
+        # rprint("[bold green]BLSATing non-self to plasmid database")
+        # plasmid_db = (
+        #     "/mnt/c/aws_data/20240701_yuanyuan_recording/db/PlasmidDatabaseJan18.db"
+        # )
+        # subprocess.run(
+        #     [
+        #         "seqkit",
+        #         "fq2fa",
+        #         f"{output_dir}/collect_spacers/other/{sample}.fq.gz",
+        #         "-o",
+        #         f"{output_dir}/collect_spacers/other/{sample}.fa",
+        #     ]
+        # )
+        # os.makedirs(f"{output_dir}/collect_spacers/other_blastn_plasmid", exist_ok=True)
+        # subprocess.run(
+        #     [
+        #         "blastn",
+        #         "-query",
+        #         f"{output_dir}/collect_spacers/other/{sample}.fa",
+        #         "-db",
+        #         plasmid_db,
+        #         "-task",
+        #         "megablast",
+        #         "-word_size",
+        #         "10",
+        #         "-perc_identity",
+        #         "95",
+        #         "-dust",
+        #         "yes",
+        #         "-evalue",
+        #         "1e-2",
+        #         "-max_target_seqs",
+        #         "10000",
+        #         "-num_threads",
+        #         "16",
+        #         "-out",
+        #         f"{output_dir}/collect_spacers/other_blastn_plasmid/{sample}.out",
+        #         "-outfmt",
+        #         "6 qseqid qlen sseqid pident length qstart qend sstart send evalue bitscore slen staxids",
+        #     ]
+        # )
 
         # ==================================
-        rprint(
-            "[bold green]Mapping reads to genome to distinguish exogenous and "
-            "endogenous spacers..[/bold green]"
-        )
-        ref_genome = (
-            "/mnt/c/aws_data/20240701_yuanyuan_recording/selected_plasmids/agg.fna"
-        )
-        makedirs(
-            *[
-                f"{data_dir}/collect_spacers/{i}"
-                for i in ["map_plasmid", "mapped_plasmid", "unmapped_plasmid"]
-            ]
-        )
-        map_se(
-            f"{data_dir}/collect_spacers/other/{sample}.fq.gz",
-            ref_genome,
-            bam_file=f"{data_dir}/collect_spacers/map_plasmid/{sample}.bam",
-            # bwa_log=f"{data_dir}/collect_spacers/log/{sample}.bwa.log",
-            mapped_reads=f"{data_dir}/collect_spacers/mapped_plasmid/{sample}.fq.gz",
-            unmapped_reads=f"{data_dir}/collect_spacers/unmapped_plasmid/{sample}.fq.gz",
-            args="relaxed",
-        )
+        # rprint(
+        #     "[bold green]Mapping reads to genome to distinguish exogenous and "
+        #     "endogenous spacers..[/bold green]"
+        # )
+        # ref_genome = (
+        #     "/mnt/c/aws_data/20240701_yuanyuan_recording/selected_plasmids/agg.fna"
+        # )
+        # makedirs(
+        #     *[
+        #         f"{output_dir}/collect_spacers/{i}"
+        #         for i in ["map_plasmid", "mapped_plasmid", "unmapped_plasmid"]
+        #     ]
+        # )
+        # map_se(
+        #     f"{output_dir}/collect_spacers/other/{sample}.fq.gz",
+        #     ref_genome,
+        #     bam_file=f"{output_dir}/collect_spacers/map_plasmid/{sample}.bam",
+        #     # bwa_log=f"{output_dir}/collect_spacers/log/{sample}.bwa.log",
+        #     mapped_reads=f"{output_dir}/collect_spacers/mapped_plasmid/{sample}.fq.gz",
+        #     unmapped_reads=f"{output_dir}/collect_spacers/unmapped_plasmid/{sample}.fq.gz",
+        #     args="relaxed",
+        # )
