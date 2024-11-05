@@ -526,7 +526,7 @@ def unoise3(
     input_fastq: str | IO[str] | gzip.GzipFile,
     output_fasta: str | IO[str] | gzip.GzipFile | None,
     min_size: int,
-    relabel_prefix: str = None,
+    relabel_prefix: str | None = None,
     size_out: bool = False,
     num_threads: int = 16,
     stderr: bool = True,
