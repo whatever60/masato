@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import warnings
 
 import numpy as np
 from scipy.cluster.hierarchy import linkage, leaves_list, dendrogram
@@ -11,6 +12,8 @@ from joblib import Parallel, delayed
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.ticker import FixedLocator
 import seaborn as sns
 
@@ -69,7 +72,7 @@ def _stacked_bar(
     names: list[str],
     title: str,
     palette: list,
-    axs: list[plt.Axes],
+    axs: list[list[Axes]],
     orientation: str = "vertical",
 ) -> None:
     """Indices of input dataframes are samples, which is non-overlapping. Columns are
@@ -128,13 +131,13 @@ def _heatmap(
     dfs: list[pd.DataFrame],
     names: list[str],
     title: str,
-    fig: plt.Figure,
-    axs_heatmap: list[plt.Axes],
-    axs_dend: list[plt.Axes],
+    fig: Figure,
+    axs_heatmap: list[Axes],
+    axs_dend: list[Axes],
     cmap: str,
     linkage_row: np.ndarray | dendropy.Tree = None,
-    linkage_row_legend: dict=None,
-    cbar_label: str = None,
+    linkage_row_legend: dict | None = None,
+    cbar_label: str | None = None,
     vmax: float | None = None,
     vmin: float | None = None,
     dfs_iso=None,
@@ -167,13 +170,13 @@ def _heatmap(
             height = 5 / df.shape[0]
             cbar_ax_width = 2 / sum(d.shape[1] for d in dfs)
             cbar_ax = fig.add_axes(
-                [
+                (
                     ax.get_position().x1
                     + (0.04 + (0 if linkage_row is None else dend_row_ax_width)),
                     axs_heatmap[i - 1].get_position().y1 - 1.1 * height,
                     cbar_ax_width,
                     height,
-                ]
+                )
             )
             cbar_ax.yaxis.label.set_size(12)
             cbar_kws = {"label": cbar_label}
@@ -225,12 +228,12 @@ def _heatmap(
         if ax_dend is not None:
             # enforce ax_dend to have the same width as ax
             ax_dend.set_position(
-                [
+                (
                     ax.get_position().x0,
                     ax_dend.get_position().y0,
                     ax.get_position().width,
                     ax_dend.get_position().height,
-                ]
+                )
             )
             # plot dendrogram
             dendrogram(
@@ -243,12 +246,12 @@ def _heatmap(
 
         if linkage_row is not None and i == len(axs_heatmap) - 1:
             dend_row_ax = fig.add_axes(
-                [
+                (
                     ax.get_position().x1 + 0.005,
                     axs_heatmap[i - 1].get_position().y0,
                     dend_row_ax_width,
                     axs_heatmap[i - 1].get_position().height,
-                ]
+                )
             )
             dend_row_ax.axis("off")
             if isinstance(linkage_row, np.ndarray):
@@ -309,7 +312,7 @@ def _barplot_with_whisker_strip(
     group_key: str,
     column_of_interest: str,
     plot_strip: bool,
-    axs: list[plt.Axes],
+    axs: list[Axes],
     ylog: bool = False,
 ) -> None:
     axis_tick_fs = 12
@@ -402,10 +405,15 @@ def _barplot_with_whisker_strip(
     axs[0].set_ylabel(title, fontsize=14)
     if ylog:
         # set range to lower than the minimum value and higher than the maximum value
-        ax.set_ylim(
-            10 ** (np.floor(np.log10(min(values)))),
-            10 ** (np.ceil(np.log10(max(values)))),
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # possible warnings here:
+            # - RuntimeWarning: divide by zero encountered in log10
+            # - UserWarning: Attempt to set non-positive ylim on a log-scaled axis with be ignored.
+            axs[0].set_ylim(
+                10 ** (np.floor(np.log10(min(values)))),
+                10 ** (np.ceil(np.log10(max(values)))),
+            )
 
 
 def _calc_alpha_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -432,7 +440,7 @@ def _get_subplots(
     wspace: float = 0.1,
     hspace: float = 0.01,
     orientation: str = "vertical",
-) -> tuple[plt.Figure, list[list[plt.Axes]]]:
+) -> tuple[Figure, list[list[Axes]]]:
     """A helper function to get matplotlib figure and axes for plotting stacked bar plot
     or heatmap with multiple panels.
     """
@@ -494,11 +502,11 @@ def _get_subplots(
         # share y for the heatmap, i.e., the second row
         if orientation == "vertical":
             for i in range(1, num_cols):
-                axs[1, i].sharey(axs[1, 0])
+                axs[1][ i].sharey(axs[1][0])
         elif orientation == "horizontal":
             axs = axs[::-1]
             for i in range(1, num_cols):
-                axs[1, i].sharex(axs[0, 1])
+                axs[1][i].sharex(axs[0][1])
         else:
             raise ValueError("Unknown orientation.")
         fig.subplots_adjust(wspace=wspace, hspace=hspace)
@@ -558,11 +566,11 @@ def rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
 
 
 def main():
-# if __name__ == "__main__":
+    # if __name__ == "__main__":
 
     # matplotlib.use("TkAgg")
     plt.rcParams["pdf.fonttype"] = 42
-    plt.rcParams['svg.fonttype'] = 'none'
+    plt.rcParams["svg.fonttype"] = "none"
 
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command")
