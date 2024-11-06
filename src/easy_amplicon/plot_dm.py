@@ -87,15 +87,20 @@ def plot_dm(
     annotate_dots: bool = False,
     plot_ellipses: bool = False,
 ) -> None:
+    n_components = min(10, *df_otu_count.shape)
+    n_pcs = min(3, n_components)
+    if n_components == 1:
+        raise ValueError(f"Minimum dimensionality of input data is 2, getting {n_components}.")
+
     if distance == "braycurtis":
         bd = beta_diversity("braycurtis", df_otu_count)
         dist_mtx = np.nan_to_num(bd.data, 0)
-        pc_obj = pcoa(dist_mtx, number_of_dimensions=min(10, *df_otu_count.shape))
+        pc_obj = pcoa(dist_mtx, number_of_dimensions=n_components)
         pc = pc_obj.samples.copy()
         pc.index = df_otu_count.index
         variance = pc_obj.proportion_explained.to_numpy()
     elif distance == "euclid":
-        pc_obj = PCA(n_components=min(10, *df_otu_count.shape)).fit(df_otu_count)
+        pc_obj = PCA(n_components=n_components).fit(df_otu_count)
         pc = pc_obj.transform(df_otu_count)
         pc = pd.DataFrame(
             pc,
@@ -105,6 +110,10 @@ def plot_dm(
         variance = pc_obj.explained_variance_ratio_
     else:
         raise NotImplementedError(f"Unsupported distance metric: {distance}")
+
+    if n_pcs == 2:
+        pc["PC3"] = 0
+        variance = np.append(variance, 0)
 
     marker_size = 8
     pc = pd.concat([pc, df_meta], axis=1)
@@ -152,6 +161,7 @@ def plot_dm(
     )
     axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
     axs[1].set_ylabel(f"PC3 ({variance[2] * 100:.2f}%)", fontsize=axis_label_fs)
+
     # set axis to be square
     for ax in axs:
         xleft, xright = ax.get_xlim()
