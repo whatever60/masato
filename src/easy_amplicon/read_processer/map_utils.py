@@ -26,7 +26,7 @@ def map_se(
     if args == "default":
         args = ""
     elif args == "relaxed":
-        args = "-B 2 -O 4 -E 2 -T 10 "
+        args = "-k 9 -B 2 -O 4 -E 2 -T 27 "
         # B: mismatch penalty, O: gap open penalty, E: gap extension penalty, T: minimum threshold
     try:
         # Step 2: Align the reads and pipe directly to BAM, then sort

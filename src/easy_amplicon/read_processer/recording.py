@@ -6,6 +6,8 @@ import shutil
 from glob import glob
 from collections import Counter
 import tempfile
+import sys
+from contextlib import contextmanager
 
 import pandas as pd
 from Bio import Seq, SeqIO
@@ -20,9 +22,29 @@ from easy_amplicon.trim import (
     ECREC_DR,
     ECREC_LEADER,
     ECREC_SPACER0,
+    RECORDING_PRIMER_3,
+    RECORDING_PRIMER_5,
+    get_min_overlap,
 )
 from easy_amplicon.utils import print_command, smart_open, find_paired_end_files
 from easy_amplicon.read_processer.map_utils import map_se
+
+
+@contextmanager
+def suppress_stdout():
+    """
+    Context manager to temporarily suppress stdout.
+    """
+    # Save the original stdout file descriptor
+    original_stdout = sys.stdout
+    try:
+        # Redirect stdout to a null device
+        sys.stdout = open(os.devnull, "w")
+        yield
+    finally:
+        # Restore the original stdout
+        sys.stdout.close()
+        sys.stdout = original_stdout
 
 
 def fastp_merge(sample: str, read1: str, read2: str, output_dir: str, cpus: int):
@@ -140,7 +162,7 @@ def run_cutadapt(
 
         if log_file is not None:
             with open(log_file, "w") as log:
-                print_command(cutadapt_cmd)
+                print_command(seqkit_cmd_1)
                 p1 = subprocess.Popen(seqkit_cmd_1, stdout=subprocess.PIPE)
                 print_command(cutadapt_cmd)
                 p2 = subprocess.Popen(
@@ -155,7 +177,7 @@ def run_cutadapt(
                 )
                 _, _ = p3.communicate()
         else:
-            print_command(cutadapt_cmd)
+            print_command(seqkit_cmd_1)
             p1 = subprocess.Popen(seqkit_cmd_1, stdout=subprocess.PIPE)
             print_command(cutadapt_cmd)
             p2 = subprocess.Popen(
@@ -467,7 +489,8 @@ def process_one_sample(
         input_file=output_merged,
         output_file=output_rm_adapters,
         log_file=f"{merge_dir}/log/{sample}.clean.out",
-        adapter_3=get_primer_set("recording_adapter"),
+        adapter_3=f"{RECORDING_PRIMER_5};rightmost;min_overlap={get_min_overlap(RECORDING_PRIMER_5, frac=0.5)}"
+        f"...{RECORDING_PRIMER_3};min_overlap={get_min_overlap(RECORDING_PRIMER_3, frac=0.5)}",
         min_length=100,
         cores=cpus,
     )
@@ -477,12 +500,15 @@ def process_one_sample(
     makedirs(umi5_dir)
     output_umi5_rest = f"{umi5_dir}/rest/{sample}.fq.gz"
     output_umi5_umi = f"{umi5_dir}/umi/{sample}.fq.gz"
+    adapter_3 = ECREC_LEADER
+    adapter_3 = f"{adapter_3};min_overlap={get_min_overlap(adapter_3)}"
+    adapter_5 = f"^NNNNNN{ECREC_LEADER}"
     run_cutadapt(
         input_file=output_rm_adapters,
         output_file=output_umi5_umi,
         untrimmed_output=f"{umi5_dir}/umi_untrimmed/{sample}.fq.gz",
         log_file=f"{umi5_dir}/log/{sample}.umi.out",
-        adapter_3=get_primer_set("recording_leader_dr"),
+        adapter_3=adapter_3,
         e=0.3,
         cores=cpus,
     )
@@ -491,7 +517,7 @@ def process_one_sample(
         output_file=output_umi5_rest,
         untrimmed_output=f"{umi5_dir}/rest_untrimmed/{sample}.fq.gz",
         log_file=f"{umi5_dir}/log/{sample}.rest.out",
-        adapter_5=f"^NNNNNN{ECREC_LEADER}{ECREC_DR}",
+        adapter_5=adapter_5,
         e=0.3,
         cores=cpus,
     )
@@ -501,12 +527,15 @@ def process_one_sample(
     makedirs(umi3_dir)
     output_umi3_rest = f"{umi3_dir}/rest/{sample}.fq.gz"
     output_umi3_umi = f"{umi3_dir}/umi/{sample}.fq.gz"
+    adapter_5 = ECREC_DR + ECREC_SPACER0
+    adapter_5 = f"{adapter_5};min_overlap={get_min_overlap(adapter_5)};rightmost"
+    adapter_3 = f"{ECREC_DR}{ECREC_SPACER0}NNNNNN$"
     run_cutadapt(
         input_file=output_umi5_rest,
         output_file=output_umi3_umi,
         untrimmed_output=f"{umi3_dir}/umi_untrimmed/{sample}.fq.gz",
         log_file=f"{umi3_dir}/log/{sample}.umi.out",
-        adapter_5=get_primer_set("recording_spacer0"),
+        adapter_5=adapter_5,
         cores=cpus,
     )
     run_cutadapt(
@@ -514,7 +543,7 @@ def process_one_sample(
         output_file=output_umi3_rest,
         untrimmed_output=f"{umi3_dir}/rest_untrimmed/{sample}.fq.gz",
         log_file=f"{umi3_dir}/log/{sample}.rest.out",
-        adapter_3=f"{ECREC_SPACER0}NNNNNN$",
+        adapter_3=adapter_3,
         cores=cpus,
     )
 
@@ -531,8 +560,8 @@ def process_one_sample(
             output_file=output_spacer_spacer,
             untrimmed_output=f"{spacer_dir}/spacer_untrimmed/{sample}.fq.gz",
             log_file=f"{spacer_dir}/log/{sample}.spacer.out",
-            adapter_3=get_primer_set("recording_dr"),
-            min_length=1,
+            adapter_5=ECREC_DR + f";min_overlap={get_min_overlap(ECREC_DR)};rightmost",
+            min_length=5,
             cores=cpus,
         )
         run_cutadapt(
@@ -540,26 +569,27 @@ def process_one_sample(
             output_file=output_spacer_rest,
             untrimmed_output=f"{spacer_dir}/rest_untrimmed/{sample}.fq.gz",
             log_file=f"{spacer_dir}/log/{sample}.rest.out",
-            adapter_5=get_primer_set("recording_dr"),
+            adapter_5=get_rc(ECREC_DR) + f";min_overlap={get_min_overlap(ECREC_DR)}",
             min_length=1,
             cores=cpus,
+            rc=True,
         )
         # NOTE: Take the common seq between output_spacer_spacer and output_spacer_rest as the
         # final output_spacer_rest, since we only feed to the next round for those sequences that
         # have spacer at this round.
         # We use seqkit for this and follows its document, which prefer grep over common with 2 files.
-        # The input for grep is the bigger file (in our case output_spacer_spacer) and the pattern file
-        # is the smaller file (output_spacer_rest).
+        # The input for grep is the bigger file (in our case output_spacer_rest) and the pattern file
+        # is the smaller file (output_spacer_spacer).
         # save it to a temp fq.gz
         with tempfile.NamedTemporaryFile(suffix=".fq.gz", delete=False) as temp:
             output_spacer_rest_temp = temp.name
-            args_seq = ["seqkit", "seq", "-n", "-i", output_spacer_rest]
+            args_seq = ["seqkit", "seq", "--name", "--only-id", output_spacer_spacer]
             args_grep = [
                 "seqkit",
                 "grep",
-                "-f",
+                "--pattern-file",
                 "-",
-                output_spacer_spacer,
+                output_spacer_rest,
                 "-o",
                 output_spacer_rest_temp,
             ]
@@ -575,6 +605,16 @@ def process_one_sample(
                 stderr=subprocess.DEVNULL,
             )
             prog_grep.communicate()
+            # args = [
+            #     "seqkit",
+            #     "common",
+            #     output_spacer_rest,
+            #     output_spacer_spacer,
+            #     "-o",
+            #     output_spacer_rest_temp,
+            # ]
+            # print_command(args)
+            # subprocess.run(args)
             shutil.move(output_spacer_rest_temp, output_spacer_rest)
 
         if all_sequences_empty(output_spacer_rest):
@@ -642,7 +682,7 @@ def all_sequences_empty(fastq_file: str) -> bool:
 
 def collect_spacer_info(
     data_dir: str, sample: str, umi_length: int = 6
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """Return a dataframe and a list of spacers.
     The dataframe contains information for each read. Read name being the index, and columns are:
         - umi_5: str
@@ -678,6 +718,8 @@ def collect_spacer_info(
     df_data = pd.merge(
         umi5_df, umi3_df, how="outer", left_index=True, right_index=True
     ).fillna("")
+    if df_data.empty:
+        return None
 
     # remove reads that don't have both 5' and 3' UMI or have empty UMI
     # df_data = df_data.replace("", np.nan).dropna()
@@ -744,32 +786,55 @@ def correct_umi(df_data: pd.DataFrame) -> dict[str, str]:
     return read2umi_corrected
 
 
+def add_target(df_data: pd.DataFrame, collapse_mode: str | None = None) -> pd.DataFrame:
+    """Add target sequence to the dataframe"""
+    df_data = df_data.copy()
+    df_data["target"] = None
+    df_data["size"] = -1
+    if collapse_mode is None:
+        pass
+    else:
+        if collapse_mode == "umi":
+            groupby = ["num_spacers", "centroid", "umi_corrected"]
+        elif collapse_mode == "centroid":
+            groupby = ["centroid"]
+        else:
+            raise ValueError(f"Unknown collapse mode: {collapse_mode}")
+        for _, df_g in df_data.groupby(groupby):
+            target = df_g.sort_values("spacer_qual", ascending=False).iloc[0].name
+            for i in df_g.index:
+                df_data.loc[i, "target"] = target
+            df_data.loc[target, "size"] = df_g.shape[0]
+    return df_data
+
+
+def agg_arrays(df_data: pd.DataFrame) -> pd.DataFrame:
+    return df_data.loc[df_data.index == df_data.target].copy().sort_values("size")
+
+
 def collect_spacers(
     df_data: pd.DataFrame,
     data_dir: str,
     output_path: str,
     sample: str,
-    collapse_mode: str | None = None,
 ) -> None:
     spacer_orders = [int(i[-1]) for i in glob(os.path.join(data_dir, "spacer*"))]
     # output_path = os.path.join(data_dir, "collect_spacers", "spacer", f"{sample}.fq.gz")
     # reads without spacers are not relevant
-    df_data = df_data.query("num_spacers > 0")
-
-    if collapse_mode == "umi":
-        # For those that have the same num spacers and umi_corrected and centroid, take
-        # the one with the highest spacer_qual.
-        df_data = df_data.reset_index().groupby(["num_spacers", "centroid", "umi_corrected"]).apply(
-            lambda x: x.sort_values("spacer_qual", ascending=False).iloc[0]
-        ).set_index("index")
-    elif collapse_mode == "centroid":
-        # For those that have the centroid, take the one with the highest spacer_qual.
-        df_data = df_data.reset_index().groupby("centroid").apply(
-            lambda x: x.sort_values("spacer_qual", ascending=False).iloc[0]
-        ).set_index("index")
-    else:
-        if collapse_mode is not None:
-            raise ValueError(f"Unknown collapse mode: {collapse_mode}")
+    # if collapse_mode == "umi":
+    #     # For those that have the same num spacers and umi_corrected and centroid, take
+    #     # the one with the highest spacer_qual.
+    #     df_data = df_data.reset_index().groupby(["num_spacers", "centroid", "umi_corrected"]).apply(
+    #         lambda x: x.sort_values("spacer_qual", ascending=False).iloc[0]
+    #     ).set_index("index")
+    # elif collapse_mode == "centroid":
+    #     # For those that have the centroid, take the one with the highest spacer_qual.
+    #     df_data = df_data.reset_index().groupby("centroid").apply(
+    #         lambda x: x.sort_values("spacer_qual", ascending=False).iloc[0]
+    #     ).set_index("index")
+    # else:
+    #     if collapse_mode is not None:
+    #         raise ValueError(f"Unknown collapse mode: {collapse_mode}")
 
     good_reads = set(df_data.index)
 
@@ -783,8 +848,9 @@ def collect_spacers(
             with gzip.open(spacer_path, "rt") as f_in:
                 for record in SeqIO.parse(f_in, "fastq"):
                     if record.id in good_reads:
+                        size = df_data.loc[record.id, "size"]
                         # add order to the read name as another :<order>
-                        record.id = f"{record.id}:{spacer_order}"
+                        record.id = f"{record.id};order={spacer_order};size={size}"
                         SeqIO.write(record, f_out, "fastq")
 
 
@@ -882,74 +948,89 @@ def main():
         def print_command(*args, **kwargs):
             return None
 
-    bar = tqdm(find_paired_end_files(fastq_dir))
+    bar = tqdm(find_paired_end_files(fastq_dir), leave=False)
     for i, (read1, read2, sample) in enumerate(bar):
         if "Undetermined" in sample:
             continue
-        # if "399" not in sample:
+        # if i < 66:
         #     continue
         bar.set_description(sample)
         # # ==================================
         # rprint(f"[bold green]Extracting spacers from reads of {sample}..[/bold green]")
-        # process_one_sample(
-        #     sample,
-        #     # read1=glob(f"{fastq_dir}/{sample}_S*_L001_R1_001.fastq.gz")[0],
-        #     # read2=glob(f"{fastq_dir}/{sample}_S*_L001_R2_001.fastq.gz")[0],
-        #     read1=read1,
-        #     read2=read2,
-        #     output_dir=output_dir,
-        #     cpus=4,
-        # )
+        # with suppress_stdout():
+        #     process_one_sample(
+        #         sample,
+        #         # read1=glob(f"{fastq_dir}/{sample}_S*_L001_R1_001.fastq.gz")[0],
+        #         # read2=glob(f"{fastq_dir}/{sample}_S*_L001_R2_001.fastq.gz")[0],
+        #         read1=read1,
+        #         read2=read2,
+        #         output_dir=output_dir,
+        #         cpus=4,
+        #     )
 
-        # # ==================================
-        # rprint(
-        #     "[bold green]Collecting spacer information and correcting UMI..[/bold green]"
-        # )
-        spacer_info_path = f"{output_dir}/collect_spacers/spacer_info/{sample}.tsv"
+        # # # ==================================
+        # rprint("[bold green]Correcting UMI..[/bold green]")
+        # spacer_info_path = f"{output_dir}/collect_spacers/spacer_info/{sample}_full.tsv"
+        # spacer_info_agg_path = f"{output_dir}/collect_spacers/spacer_info/{sample}.tsv"
         # os.makedirs(os.path.dirname(spacer_info_path), exist_ok=True)
         # df_data = collect_spacer_info(output_dir, sample)
+        # if df_data is None:
+        #     print(f"WARNING: No arrays with UMI for {sample}, skipping mapping")
+        #     continue
         # if df_data.num_spacers.max() == 0:
-        #     print(f"WARNING: No spacers found in {sample}, skipping mapping")
+        #     print(f"WARNING: No arryas with spacer found in {sample}, skipping mapping")
         #     df_data.to_csv(spacer_info_path, sep="\t")
         #     continue
         # read2umi_corrected = correct_umi(df_data)
         # df_data["umi_corrected"] = df_data.index.map(read2umi_corrected)
         # assert df_data.query("good_umi").umi_corrected.notna().all()
+        # df_data_full = add_target(df_data, collapse_mode)
+        # df_data_agg = agg_arrays(df_data_full)
         # # save spacer info
-        # df_data.to_csv(spacer_info_path, sep="\t")
-
-        # ==================================
-        rprint("[bold green]Collecting spacer sequences..[/bold green]")
-        df_data = pd.read_table(spacer_info_path, index_col=0)
-        output_path = f"{output_dir}/collect_spacers/spacer/{sample}.fq.gz"
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        collect_spacers(
-            df_data=df_data,
-            data_dir=output_dir,
-            output_path=output_path,
-            sample=sample,
-            collapse_mode=collapse_mode,
-        )
+        # df_data_full.to_csv(spacer_info_path, sep="\t")
+        # df_data_agg.to_csv(spacer_info_agg_path, sep="\t")
 
         # # ==================================
-        # rprint(
-        #     "[bold green]Mapping reads to genome to distinguish exogenous and "
-        #     "endogenous spacers..[/bold green]"
+        # rprint("[bold green]Collecting spacer sequences..[/bold green]")
+        # df_data_full = pd.read_table(spacer_info_path, index_col=0)
+        # df_data_agg = pd.read_table(spacer_info_agg_path, index_col=0)
+        # output_full_path = f"{output_dir}/collect_spacers/spacer_full/{sample}.fq.gz"
+        # output_agg_path = f"{output_dir}/collect_spacers/spacer/{sample}.fq.gz"
+        # os.makedirs(os.path.dirname(output_agg_path), exist_ok=True)
+        # os.makedirs(os.path.dirname(output_full_path), exist_ok=True)
+        # collect_spacers(
+        #     df_data=df_data_agg,
+        #     data_dir=output_dir,
+        #     output_path=output_agg_path,
+        #     sample=sample,
         # )
-        # makedirs(
-        #     *[
-        #         f"{output_dir}/collect_spacers/{i}"
-        #         for i in ["map", "self", "other", "log"]
-        #     ]
+        # collect_spacers(
+        #     df_data=df_data_full,
+        #     data_dir=output_dir,
+        #     output_path=output_full_path,
+        #     sample=sample,
         # )
-        # map_se(
-        #     f"{output_dir}/collect_spacers/spacer/{sample}.fq.gz",
-        #     ref_genome,
-        #     bam_file=f"{output_dir}/collect_spacers/map/{sample}.bam",
-        #     bwa_log=f"{output_dir}/collect_spacers/log/{sample}.bwa.log",
-        #     mapped_reads=f"{output_dir}/collect_spacers/self/{sample}.fq.gz",
-        #     unmapped_reads=f"{output_dir}/collect_spacers/other/{sample}.fq.gz",
-        # )
+
+        # # ==================================
+        rprint(
+            "[bold green]Mapping reads to genome to distinguish exogenous and "
+            "endogenous spacers..[/bold green]"
+        )
+        makedirs(
+            *[
+                f"{output_dir}/collect_spacers/{i}"
+                for i in ["map", "self", "other", "log"]
+            ]
+        )
+        map_se(
+            f"{output_dir}/collect_spacers/spacer/{sample}.fq.gz",
+            ref_genome,
+            bam_file=f"{output_dir}/collect_spacers/map/{sample}.bam",
+            bwa_log=f"{output_dir}/collect_spacers/log/{sample}.bwa.log",
+            mapped_reads=f"{output_dir}/collect_spacers/self/{sample}.fq.gz",
+            unmapped_reads=f"{output_dir}/collect_spacers/other/{sample}.fq.gz",
+            args="relaxed",
+        )
 
         # ==================================
         # ref_genome = (
