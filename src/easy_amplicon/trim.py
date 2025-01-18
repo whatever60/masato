@@ -282,10 +282,11 @@ def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
     os.chdir(original_dir)
 
 
-def get_primer_set(name: str) -> tuple[str, str | None] | dict[str, str] | str:
-    def get_min_overlap(adapter: str, frac: float = 0.8) -> int:
-        return int(len(adapter) * frac)
+def get_min_overlap(adapter: str, frac: float = 0.8) -> int:
+    return int(len(adapter) * frac)
 
+
+def get_primer_set(name: str) -> tuple[str, str | None] | dict[str, str] | str:
     if name == "its":
         return (
             f"^{PRIMER_ITS_5};required...{get_rc(PRIMER_ITS_7)};optional",
@@ -349,7 +350,7 @@ def isolate_150_preprocess(
     rename_pattern: str,
     output_fastq: str,
     primer_set: str,
-    first_k: int = None,
+    first_k: int | None = None,
     min_length: int = 100,
     early_stop: bool = False,
 ) -> None:
@@ -952,7 +953,7 @@ def main():
     if args.mode == "simple":
         simple_preprocess(args.input_dir, args.output)
     elif args.mode == "isolate_150":
-        # for barcode_fwd, barcode_rev and pattern, first look for them as if they are 
+        # for barcode_fwd, barcode_rev and pattern, first look for them as if they are
         # normal file path, if not exist, then look for them in script_dir/../../data
         if args.barcode_fwd is not None and not os.path.isfile(args.barcode_fwd):
             barcode_fwd = os.path.join(
@@ -967,9 +968,7 @@ def main():
         else:
             barcode_rev = args.barcode_rev
         if args.pattern is not None and not os.path.isfile(args.pattern):
-            pattern = os.path.join(
-                os.path.dirname(__file__), "data", args.pattern
-            )
+            pattern = os.path.join(os.path.dirname(__file__), "data", args.pattern)
         else:
             pattern = args.pattern
 
