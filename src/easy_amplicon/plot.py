@@ -9,8 +9,8 @@ import pandas as pd
 from skbio.diversity.alpha import chao1, shannon, simpson
 import dendropy
 from joblib import Parallel, delayed
-import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
 import matplotlib.gridspec as gridspec
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -135,7 +135,7 @@ def _heatmap(
     axs_heatmap: list[Axes],
     axs_dend: list[Axes],
     cmap: str,
-    linkage_row: np.ndarray | dendropy.Tree = None,
+    linkage_row: np.ndarray | dendropy.Tree | None = None,
     linkage_row_legend: dict | None = None,
     cbar_label: str | None = None,
     vmax: float | None = None,
@@ -190,6 +190,7 @@ def _heatmap(
             df = df.transpose()
         if df_iso is not None:
             df_iso = df_iso.reindex(df.index, axis=0, fill_value="").loc[:, df.columns]
+        ax_pos = ax.get_position()
         sns.heatmap(
             df,  # .clip(lower=vmin) if vmin is not None else df,
             ax=ax,
@@ -220,6 +221,27 @@ def _heatmap(
                 fmt="",
                 annot_kws={"color": "k"},
                 mask=~np.isinf(df).to_numpy(),
+            )
+
+        # NOTE: I am observing a strange behavior of the heatmap, where the height of
+        # the last axis is changed after sns.heatmap while the width is not, which is
+        # the opposite of other axes. This is a workaround to revert the height of the
+        # last axis after sns.heatmap to before, and infer the correct width based on
+        # the per column width from previous axes.
+        if i and i == len(axs_heatmap) - 1:
+            ax_pos_new = ax.get_position()
+            last_ax_pos = axs_heatmap[i - 1].get_position()
+            sample_width = (last_ax_pos.x1 - last_ax_pos.x0) / dfs[i - 1].shape[1]
+            # keep
+            ax.set_position(
+                Bbox(
+                    np.array(
+                        [
+                            [ax_pos_new.x0, ax_pos.y0],
+                            [ax_pos_new.x0 + sample_width * df.shape[1], ax_pos.y1],
+                        ]
+                    )
+                )
             )
 
         ax.set_xlabel("")
@@ -471,6 +493,12 @@ def _get_subplots(
             raise ValueError("Unknown orientation.")
         if num_cols == 1:
             axs = [axs]
+        # if orientation == "vertical":
+        #     for i in range(1, num_cols):
+        #         axs[i].sharey(axs[0])
+        # elif orientation == "horizontal":
+        #     for i in range(1, num_cols):
+        #         axs[i].sharex(axs[0])
         axs = [[None] * num_cols, axs]
         fig.subplots_adjust(wspace=wspace, hspace=hspace)
     else:
@@ -502,7 +530,7 @@ def _get_subplots(
         # share y for the heatmap, i.e., the second row
         if orientation == "vertical":
             for i in range(1, num_cols):
-                axs[1][ i].sharey(axs[1][0])
+                axs[1][i].sharey(axs[1][0])
         elif orientation == "horizontal":
             axs = axs[::-1]
             for i in range(1, num_cols):
@@ -750,6 +778,10 @@ def main():
                 axis=0,
                 aggfunc="sum",
             )
+            # drop None index
+            df_otu_count_iso_g = df_otu_count_iso_g.loc[
+                ~df_otu_count_iso_g.index.isna()
+            ]
 
         if len(rel_ab_thresholds) == 1:
             rel_ab_thresholds = rel_ab_thresholds * len(tax_levels)
@@ -788,11 +820,13 @@ def main():
                         raise ValueError("No common replication group.")
                     bulk_removed = bulk_samples - rep_group_both
                     iso_removed = iso_samples - rep_group_both
-                    print(f"WARNING: Samples in bulk and isolate are not the same. ")
+                    print("WARNING: Samples in bulk and isolate are not the same. ")
                     if bulk_removed:
-                        print(f"Samples removed: {bulk_removed}.")
+                        print(f"Samples removed from bulk: {bulk_removed}.")
                     if iso_removed:
-                        print(f"Samples removed: {iso_removed}.")
+                        print(f"Samples removed from isolate: {iso_removed}.")
+                    # Take the union of the two by filling in zero while respecting the order of the bulk
+
                     # res = res[lambda x: x in rep_group_both]
                     # res_iso = res_iso[lambda x: x in rep_group_both]
                     res = res.query("index in @rep_group_both")
@@ -1304,7 +1338,7 @@ def main():
                     ylog=False,
                 )
                 fig.subplots_adjust(wspace=wspace)
-                for format_ in ["png", "pdf"]:
+                for format_ in ["png", "svg"]:
                     fig.savefig(
                         f"{fig_dir}/{column_of_interest}_{level}.{format_}",
                         bbox_inches="tight",
@@ -1341,7 +1375,7 @@ def main():
             axs=axs,
             ylog=True,
         )
-        for format_ in ["png", "pdf"]:
+        for format_ in ["png", "svg"]:
             fig.savefig(
                 f"{fig_dir}/sequencing_depth.{format_}",
                 bbox_inches="tight",
