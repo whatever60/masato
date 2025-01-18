@@ -79,7 +79,7 @@ def parse_blast_results(result: str) -> pd.DataFrame:
             if xml_file.endswith(".xml"):
                 with open(os.path.join(result, xml_file), "r") as f:
                     results.append(f.read())
-    return pd.concat([extract_info_from_xml(result, email) for result in results])
+    return pd.concat([extract_info_from_xml(result) for result in results])
 
     # Write all results to the specified output file
     # with open(output_results_path, "w") as output_file:
