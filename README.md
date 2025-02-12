@@ -7,3 +7,5 @@
 
 Masato is a modular amplicon sequencing analysis tookit. It highlights transparent and 
 composible command line interface that helps users assemble and understand their pipeline.
+
+NOTE: This package is renamed from [easy_amplicon](https://github.com/whatever60/easy_amplicon). The old repository has been archived.
