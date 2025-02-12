@@ -42,7 +42,7 @@ import argparse
 import pandas as pd
 import polars as pl
 
-from easy_amplicon.utils import read_table, read_table
+from masato.utils import read_table, read_table
 
 
 def _find_otus_by_taxon(df_tax: pd.DataFrame, taxon: str) -> list[str]:

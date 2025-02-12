@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import seaborn as sns
 
-from easy_amplicon.get_abundance import get_otu_count, _agg_along_axis
+from masato.get_abundance import get_otu_count, _agg_along_axis
 
 
 def _load(ab_path: str, metadata_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -172,8 +172,8 @@ def plot_dm(
         # set legend markers under `hue` to o
         hues = pc[hue].unique().tolist()
         handles, labels = axs[1].get_legend_handles_labels()
-        for h, l in zip(handles, labels):
-            if l in hues:
+        for h, label in zip(handles, labels):
+            if label in hues:
                 # set marker size to s and marker to o
                 h.set_marker("o")
             h.set_markersize(marker_size)

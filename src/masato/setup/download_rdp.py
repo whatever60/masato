@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 """
-Simply run wget -qO- http://easy-amplicon-camii-test-data.s3.amazonaws.com/dist.tar.gz | tar xz -C easy_amplicon.__path__[0] + "/../.."
+Simply run wget -qO- http://easy-amplicon-camii-test-data.s3.amazonaws.com/dist.tar.gz | tar xz -C masato.__path__[0] + "/../.."
 """
 
 import subprocess
 
-import easy_amplicon
+import masato
 
 
 def main():
-    output_dir = easy_amplicon.__path__[0] + "/../.."
+    output_dir = masato.__path__[0] + "/../.."
 
     res = subprocess.run(
         f"wget -qO- http://easy-amplicon-camii-test-data.s3.amazonaws.com/dist.tar.gz | tar xz -C {output_dir}", shell=True, check=True

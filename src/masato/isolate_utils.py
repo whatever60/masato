@@ -7,8 +7,8 @@ import glob
 import numpy as np
 import pandas as pd
 
-from easy_amplicon.get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
-from easy_amplicon.utils import write_table
+from masato.get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
+from masato.utils import write_table
 
 
 def _read_isolate_metadata(isolate_metadata_dir: str) -> pd.DataFrame:

@@ -1,7 +1,7 @@
 [project]
-name = "easy-amplicon"
-version = "1.0.8"
-description = "Add your description here"
+name = "masato"
+version = "1.1.0"
+description = "Modular Amplicon Sequencing Analysis TOokit"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -28,24 +28,24 @@ dependencies = [
 ]
 
 [project.scripts]
-"analysis.py" = "easy_amplicon.analysis:main"
-"analysis_sintax.py" = "easy_amplicon.analysis_sintax:main"
-"get_abundance.py" = "easy_amplicon.get_abundance:main"
-"get_tree.py" = "easy_amplicon.get_tree:main"
-"isolate_utils.py" = "easy_amplicon.isolate_utils:main"
-"plot.py" = "easy_amplicon.plot:main"
-"plot_dm.py" = "easy_amplicon.plot_dm:main"
-"process_nbc_tax.py" = "easy_amplicon.process_nbc_tax:main"
-"process_rrndb.py" = "easy_amplicon.process_rrndb:main"
-"trim.py" = "easy_amplicon.trim:main"
-"usearch_workflow.py" = "easy_amplicon.usearch_workflow:main"
-"utils_blast.py" = "easy_amplicon.utils_blast:main"
-"recording.py" = "easy_amplicon.read_processer.recording:main"
-"run_rdp_classifier.py" = "easy_amplicon.run_rdp_classifier:main"
+"analysis.py" = "masato.analysis:main"
+"analysis_sintax.py" = "masato.analysis_sintax:main"
+"get_abundance.py" = "masato.get_abundance:main"
+"get_tree.py" = "masato.get_tree:main"
+"isolate_utils.py" = "masato.isolate_utils:main"
+"plot.py" = "masato.plot:main"
+"plot_dm.py" = "masato.plot_dm:main"
+"process_nbc_tax.py" = "masato.process_nbc_tax:main"
+"process_rrndb.py" = "masato.process_rrndb:main"
+"trim.py" = "masato.trim:main"
+"usearch_workflow.py" = "masato.usearch_workflow:main"
+"utils_blast.py" = "masato.utils_blast:main"
+"recording.py" = "masato.read_processer.recording:main"
+"run_rdp_classifier.py" = "masato.run_rdp_classifier:main"
 # setup scripts
-easy_amplicon_conda_install = "easy_amplicon.setup.conda_install:main"
-easy_amplicon_download_rdp = "easy_amplicon.setup.download_rdp:main"
-easy_amplicon_download_test_data = "easy_amplicon.setup.download_test_data:main"
+masato_conda_install = "masato.setup.conda_install:main"
+masato_download_rdp = "masato.setup.download_rdp:main"
+masato_download_test_data = "masato.setup.download_test_data:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -5,23 +5,23 @@ import os
 
 import yaml
 
-import easy_amplicon
+import masato
 
 
-# RDP_CLASSIFIER_PATH: str = easy_amplicon.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
+# RDP_CLASSIFIER_PATH: str = masato.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
 # INFO_PATH = os.path.join(os.path.dirname(__file__), "setup/info.yaml")
 # with open(INFO_PATH) as f:
 #     info = yaml.safe_load(f)
 #     rdp_classifier_path = info["rdp_classifier_path"]
 #     if rdp_classifier_path is None:
 #         RDP_CLASSIFIER_PATH = (
-#             easy_amplicon.__path__[0]
+#             masato.__path__[0]
 #             + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
 #         )
 #     else:
 #         RDP_CLASSIFIER_PATH = rdp_classifier_path
 RDP_CLASSIFIER_PATH = (
-    easy_amplicon.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
+    masato.__path__[0] + "/../../dist/rdp_classifier_2.14/dist/rdp_classifier"
 )
 
 

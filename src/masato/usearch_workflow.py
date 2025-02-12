@@ -20,7 +20,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from tqdm.auto import tqdm
 
-from easy_amplicon.utils import read_table, write_table
+from masato.utils import read_table, write_table
 
 
 def merge_pairs(
@@ -825,7 +825,7 @@ def workflow_per_sample(
         where sequence names are just sequences themselves. Identical sequences appear
         only once.
     """
-    from easy_amplicon.utils import smart_open
+    from masato.utils import smart_open
 
     current_sample = None
     fastq_for_current_sample = []

@@ -19,8 +19,8 @@ import seaborn as sns
 
 # from tqdm.auto import tqdm
 
-from easy_amplicon.get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
-from easy_amplicon.plot_tree import (
+from masato.get_abundance import get_otu_count, _agg_along_axis, _taxa_qc
+from masato.plot_tree import (
     get_taxonomy_tree,
     _calc_y,
     _get_node_label,

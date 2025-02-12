@@ -16,7 +16,7 @@ from Bio.Blast import NCBIWWW, NCBIXML
 from Bio import Entrez
 from tqdm import tqdm, trange
 
-from easy_amplicon.utils import print_command
+from masato.utils import print_command
 
 
 def blast_online(
