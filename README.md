@@ -1,4 +1,4 @@
-<h1 style="display: flex; justify-content: space-between; align-items: center;">
+<h1>
   <img align="right" alt="Logo" width="120" height="120" src="logo.png">
   <br><br>
   Masato
