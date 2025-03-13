@@ -140,28 +140,46 @@ def _calc_y(
 
 
 def get_taxon2color(
-    taxon_df: pd.DataFrame, levels_of_interest: list[str] = None
+    taxon_df: pd.DataFrame,
+    levels_of_interest: list[str] | None = None,
+    target_level: str | None = None,
 ) -> dict[str, str]:
-    """tab20c for genus, tab20b for family, set3 for order, dark2 for class, set1 for phylum."""
+    """tab20c for genus, tab20b for family, set3 for order, dark2 for class, set1 for phylum.
+    If target_level is not None, only levels above the target level will be colored.
+    """
+    levels_all = ["phylum", "class", "order", "family", "genus", "species"]
     if levels_of_interest is None:
-        levels = ["phylum", "class", "order", "family", "genus"]
+        levels = levels_all
         cmaps = ["tab20b", "Set1", "tab20c", "Set3", "Dark2"]
     else:
         levels = levels_of_interest
         cmaps = ["tab20b", "tab20c", "Dark2", "Set1", "Set3"]
+
+    # target_level_idx = 999
+    # try:
+    #     target_level_idx = levels.index(target_level)
+    # except ValueError:
+    #     pass
+
     # colors should be circular in case there are more taxon than colors
     colors = list(map(lambda c: cycle(plt.get_cmap(c).colors), cmaps))
     level2color = {l: c for l, c in zip(levels, colors)}
     res = {}
-    for level, color in level2color.items():
-        for taxon in taxon_df[level].unique():
-            res[taxon] = next(color)
+    # for level, color in enumerate(level2color.items()):
+    for level in levels:
+        if levels_all.index(level) < levels_all.index(target_level):
+            color = level2color[level]
+            for taxon in taxon_df[level].unique():
+                res[taxon] = next(color)
+        else:
+            for taxon in taxon_df[level].unique():
+                res[taxon] = None
     res["unknown"] = None
     return res
 
 
 def get_taxon2marker(
-    taxon_df: pd.DataFrame, levels_of_interest: list[str] = None
+    taxon_df: pd.DataFrame, levels_of_interest: list[str] | None = None
 ) -> dict[str, str]:
     # hexagon for domain, pentagon for phylum, square for class, triangle for order, star for family, circle for genus
     markers = "*hps^o"
