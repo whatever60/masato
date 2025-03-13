@@ -79,18 +79,22 @@ def eigsorted(cov: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def plot_dm(
     df_otu_count: pd.DataFrame,
     df_meta: pd.DataFrame,
-    fig_path: str,
-    distance: str,
+    fig_path: str | None = None,
+    distance: str = "braycurtis",
     title: str | None = None,
     hue: str | None = None,
     style: str | None = None,
     annotate_dots: bool = False,
     plot_ellipses: bool = False,
+    fig: matplotlib.figure.Figure | None = None,
+    axs: list[matplotlib.axes.Axes] | None = None,
 ) -> None:
     n_components = min(10, *df_otu_count.shape)
     n_pcs = min(3, n_components)
     if n_components == 1:
-        raise ValueError(f"Minimum dimensionality of input data is 2, getting {n_components}.")
+        raise ValueError(
+            f"Minimum dimensionality of input data is 2, getting {n_components}."
+        )
 
     if distance == "braycurtis":
         bd = beta_diversity("braycurtis", df_otu_count)
@@ -130,7 +134,12 @@ def plot_dm(
 
     axis_label_fs = 14
     title_fs = 16
-    fig, axs = plt.subplots(1, 2, figsize=(8, 3.5))
+    if fig is None or axs is None:
+        fig, axs = plt.subplots(1, 2, figsize=(8, 3.5))
+    else:
+        if not len(axs) == 2:
+            raise ValueError(f"Expected 2 axes, got {len(axs)}.")
+    axs: list[matplotlib.axes.Axes]
     sns.scatterplot(
         data=pc,
         x="PC1",
@@ -218,10 +227,12 @@ def plot_dm(
     if title is not None:
         fig.suptitle(title, fontsize=title_fs)
     fig.subplots_adjust(top=0.6)
-    # fig.tight_layout()
-    fig.savefig(fig_path, dpi=300, bbox_inches="tight")
-    # also save a pdf file
-    fig.savefig(os.path.splitext(fig_path)[0] + ".svg", bbox_inches="tight")
+    if fig_path is not None:
+        # fig.tight_layout()
+        fig.savefig(fig_path, dpi=300, bbox_inches="tight")
+        # also save a pdf file
+        fig.savefig(os.path.splitext(fig_path)[0] + ".svg", bbox_inches="tight")
+    return fig, axs
 
 
 def main():
@@ -230,7 +241,7 @@ def main():
 
     # configure matplotlib PDF saving to use text instead of vector graphics
     plt.rcParams["pdf.fonttype"] = 42
-    plt.rcParams['svg.fonttype'] = 'none'
+    plt.rcParams["svg.fonttype"] = "none"
     # matplotlib.use("TkAgg")
 
     parser = argparse.ArgumentParser()

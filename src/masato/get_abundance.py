@@ -445,10 +445,10 @@ def find_spikein_otus(
 
 def get_otu_count(
     otu_count_table: str,
-    metadata_path: str = None,
-    otu_taxonomy_path: str = None,
-    sample_weight_key: str = None,
-    spikein_taxa_key: str = None,
+    metadata_path: str | None = None,
+    otu_taxonomy_path: str | None = None,
+    sample_weight_key: str | None = None,
+    spikein_taxa_key: str | None = None,
     warning: bool = True,
 ) -> pd.DataFrame:
     df_otu_count, df_meta, df_tax = read_tables(

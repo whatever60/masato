@@ -96,7 +96,7 @@ def process_sequences(
     zotu_fasta_path: str,
     alignment_out: str,
     tree_out: str,
-    seq_names: list[str] = None,
+    seq_names: list[str] | None = None,
     tree_method: str = "raxml",
 ) -> int:
     if seq_names is None:
