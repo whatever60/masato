@@ -3,6 +3,7 @@ import argparse
 import os
 import warnings
 
+import matplotlib
 import numpy as np
 from scipy.cluster.hierarchy import linkage, leaves_list, dendrogram
 import pandas as pd
@@ -310,6 +311,7 @@ def _heatmap(
                     "Must be np.ndarray or dendropy.Tree."
                 )
             if linkage_row_legend is not None:
+                has_legend = False
                 # add legend with line style
                 for label, color in linkage_row_legend.items():
                     if color is None:
@@ -317,7 +319,9 @@ def _heatmap(
                     dend_row_ax.plot(
                         [], [], color=color, label=label, linewidth=2, linestyle="-"
                     )
-                dend_row_ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
+                    has_legend = True
+                if has_legend:
+                    dend_row_ax.legend(loc="center left", bbox_to_anchor=(1.0, 0.5))
 
         # turn off y axis ticks and tick labels (set invisible) except for the first panel
         if i == 0:
@@ -591,6 +595,457 @@ def rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
         ],
         axis=0,
     )
+
+
+def get_abundance_plot(
+    df_otu_count: pd.DataFrame,
+    df_meta: pd.DataFrame,
+    df_tax: pd.DataFrame,
+    *,
+    df_otu_count_iso: None | pd.DataFrame = None,
+    df_meta_iso: None | pd.DataFrame = None,
+    df_tax_iso: None | pd.DataFrame = None,
+    rep_group_key: str,
+    sample_group_key: str,
+    tax_levels: list[str],
+    rel_ab_thresholds: str,
+    plot_type,
+    orientation: str = "vertical",
+    sample_hierarchical_clustering: bool = False,
+    feature_hierarchical_clustering: bool = False,
+    feature_ordering,
+    isolate_rep_group_key: str,
+    isolate_sample_group_key: str,
+    keep_rare: bool = True,
+    keep_unknown: bool = False,
+) -> list[Figure]:
+    names, groups = zip(*[i for i in df_meta.groupby(sample_group_key, sort=False)])
+    ratio = [i[rep_group_key].nunique() for i in groups]
+
+    if df_otu_count_iso is not None:
+        if df_meta_iso is None or df_tax_iso is None:
+            raise ValueError(
+                "Both metadata and taxonomy tables are required for isolate."
+            )
+        names_iso, groups_iso = zip(
+            *[i for i in df_meta_iso.groupby(sample_group_key, sort=False)]
+        )
+        if not df_tax.equals(df_tax_iso):
+            raise ValueError("Taxonomy tables are not the same.")
+    else:
+        df_otu_count_iso = df_meta_iso = df_tax_iso = None
+
+    if plot_type == "heatmap_raw":
+        df_otu_rel_ab_g = _agg_along_axis(
+            df_otu_count,
+            df_meta[sample_group_key] + "\t" + df_meta[rep_group_key],
+            axis=0,
+            aggfunc="sum",
+        )
+    else:
+        # process into relative abundance and aggregate at replication group level
+        df_otu_rel_ab_g = _agg_along_axis(
+            df_otu_count.div(df_otu_count.sum(axis=1), axis=0),
+            df_meta[sample_group_key] + "\t" + df_meta[rep_group_key],
+            axis=0,
+        )
+
+    if df_otu_count_iso is not None:
+        df_otu_count_iso_g = _agg_along_axis(
+            df_otu_count_iso,
+            df_meta_iso[isolate_sample_group_key or sample_group_key]
+            + "\t"
+            + df_meta_iso[isolate_rep_group_key or rep_group_key],
+            axis=0,
+            aggfunc="sum",
+        )
+        # drop None index
+        df_otu_count_iso_g = df_otu_count_iso_g.loc[~df_otu_count_iso_g.index.isna()]
+
+    if len(rel_ab_thresholds) == 1:
+        rel_ab_thresholds = rel_ab_thresholds * len(tax_levels)
+
+    # an empirical way to determine width for pretty figure
+    width = df_otu_rel_ab_g.shape[0] / 3.5 + 1.5
+    figs = []
+    for level, rel_ab_thres in zip(tax_levels, rel_ab_thresholds):
+        # aggregate at taxonomic level
+        res = _taxa_qc(
+            _agg_along_axis(df_otu_rel_ab_g, df_tax[level], axis=1),
+            rel_ab_thres,
+            keep_rare=keep_rare,
+            keep_unknown=keep_unknown,
+        )
+        sorted_taxa = sorted(res.columns)
+        res = res[sorted_taxa]
+
+        if df_otu_count_iso is not None:
+            res_iso = _taxa_qc(
+                _agg_along_axis(df_otu_count_iso_g, df_tax[level], axis=1),
+                0,
+                keep_rare=keep_rare,
+                keep_unknown=keep_unknown,
+            )
+            other_taxa = set(res_iso.columns) - set(res.columns)
+            if other_taxa:
+                # aggregate those into an "other" columns
+                res_iso["others"] = res_iso[list(other_taxa)].sum(axis=1)
+                res_iso = res_iso.drop(other_taxa, axis=1)
+                # drop others if all zero
+                if not res_iso["others"].sum():
+                    res_iso = res_iso.drop("others", axis=1)
+            bulk_samples = set(res.index)
+            iso_samples = set(res_iso.index)
+            if not bulk_samples == iso_samples:
+                # take the intersect and print warning for removing samples
+                rep_group_both = bulk_samples & iso_samples
+                if not rep_group_both:
+                    raise ValueError("No common replication group.")
+                bulk_removed = bulk_samples - rep_group_both
+                iso_removed = iso_samples - rep_group_both
+                print("WARNING: Samples in bulk and isolate are not the same. ")
+                if bulk_removed:
+                    print(f"Samples removed from bulk: {bulk_removed}.")
+                if iso_removed:
+                    print(f"Samples removed from isolate: {iso_removed}.")
+                # Take the union of the two by filling in zero while respecting the order of the bulk
+
+                # res = res[lambda x: x in rep_group_both]
+                # res_iso = res_iso[lambda x: x in rep_group_both]
+                res = res.query("index in @rep_group_both")
+                res_iso = res_iso.query("index in @rep_group_both")
+                width = res.shape[0] / 4 + 1.5
+
+            res_iso = res_iso[[i for i in sorted_taxa if i in res_iso.columns]]
+            res_iso_group_list = [
+                res_iso.loc[
+                    pd.Index(
+                        name
+                        + "\t"
+                        + group[isolate_rep_group_key or rep_group_key].unique()
+                    ).intersection(res_iso.index)
+                ]
+                for name, group in zip(names_iso, groups_iso)
+            ]
+            for res_iso_group in res_iso_group_list:
+                res_iso_group.index = res_iso_group.index.map(
+                    lambda x: x.split("\t")[1]
+                )
+        else:
+            res_iso_group_list = None
+
+        res_group_list = [
+            res.loc[
+                pd.Index(name + "\t" + group[rep_group_key].unique()).intersection(
+                    res.index
+                )
+            ]
+            for name, group in zip(names, groups)
+        ]
+        # fix index
+        for res_group in res_group_list:
+            res_group.index = res_group.index.map(lambda x: x.split("\t")[1])
+
+        num_cols = len(res_group_list)
+        # wspace, hspace = 0.1, 0.01
+
+        fig, axs_dend, axs = None, None, None
+        if plot_type in ["stacked_bar", "all"]:
+            # stacked bar plot
+            fig_size = (width, 4)
+            custom_palette = (
+                sns.color_palette("tab20", 20)
+                + sns.color_palette("tab20b", 20)
+                + sns.color_palette("tab20c", 20)
+            )
+            fig, axs = _get_subplots(
+                num_cols,
+                fig_size,
+                ratio,
+                height_ratios=None,
+                orientation=orientation,
+            )
+            _stacked_bar(
+                res_group_list,
+                names,
+                f"Taxonomy at {level if level != 'otu' else level.upper()} level",
+                custom_palette,
+                axs,
+                orientation=orientation,
+            )
+
+        if plot_type in [
+            "heatmap",
+            "heatmap_log10",
+            "heatmap_binary",
+            "heatmap_raw",
+            "all",
+        ]:
+            size = (
+                res.shape[0] // (res.shape[0] / width),
+                max(1, res.shape[1] // (res.shape[0] / width)),
+            )
+            if plot_type in ["heatmap_log10", "heatmap", "all"]:
+                if sample_hierarchical_clustering:
+                    fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
+                else:
+                    fig, (axs_dend, axs) = _get_subplots(
+                        num_cols, size, ratio, height_ratios=None
+                    )
+                # pesudo_abundance = 1e-4
+                vmax, vmin = 1, 1e-4
+
+                def _get_log10(arr: pd.DataFrame) -> pd.DataFrame:
+                    # take log10, change -inf to log10(vmin), take transpose
+                    arr = arr.copy()
+                    arr = np.log10(arr)
+                    # arr[arr == 0] = vmin
+                    return arr
+
+                if plot_type == "heatmap":
+                    dfs = [
+                        res_group.transpose().replace(0, np.nan)
+                        for res_group in res_group_list
+                    ]
+                elif plot_type in ["heatmap_log10", "all"]:
+                    # suppress warning for 0 in log calculation
+                    with np.errstate(divide="ignore"):
+                        dfs = [
+                            _get_log10(res_group.transpose())
+                            for res_group in res_group_list
+                        ]
+                else:
+                    raise ValueError(f"Unknown plot type: {plot_type}")
+                if df_otu_count_iso is not None:
+
+                    def num_picks_to_symbol(num_picks: int) -> str:
+                        if num_picks == 0:
+                            return ""
+                        elif num_picks == 1:
+                            return "+"
+                        elif num_picks < 10:
+                            return "⁎"  # six pointed black star
+                        elif num_picks < 50:
+                            return "⁎⁎"
+                        elif num_picks < 100:
+                            return "⁂"
+                        else:
+                            return "⁎⁎\n**"
+
+                    dfs_iso = [
+                        res_iso_group.transpose().map(num_picks_to_symbol)
+                        for res_iso_group in res_iso_group_list
+                    ]
+                else:
+                    dfs_iso = None
+                df = pd.concat(dfs, axis=1)
+                taxon2color = None
+                if feature_ordering == "hierarchical":
+                    if plot_type == "heatmap_log10":
+                        min_val = df.replace(-np.inf, np.nan).min().min()
+                        df = df.replace(-np.inf, min_val)
+                    else:
+                        df = df.fillna(0)
+                    df, linkage_row = _get_dendrogram(
+                        df, rows_to_ignore=["unknown", "others"]
+                    )
+                    dfs_temp = []
+                    i = 0
+                    for df_temp in dfs:
+                        dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                        i += df_temp.shape[1]
+                    dfs = dfs_temp
+                elif feature_ordering == "taxonomy_tree":
+                    df_tax_filtered = df_tax.query(f"{level}.isin(@dfs[0].index)")
+                    tree = get_taxonomy_tree(df_tax_filtered)
+                    taxon2marker = get_taxon2marker(df_tax_filtered)
+                    ordered_taxon = _calc_y(
+                        tree,
+                        df_tax_filtered,
+                        collapse_level=level,
+                        # base=dfs[0].shape[0] - len(tree.leaf_nodes()),
+                    )
+                    get_coords(
+                        tree.seed_node,
+                        max_x=tree.seed_node.distance_from_tip()
+                        + tree.seed_node.distance_from_root(),
+                    )
+                    # df_tax_filtered["temp_sort_by"] = pd.Categorical(
+                    #     df_tax_filtered[level], categories=ordered_taxon, ordered=True
+                    # )
+                    idxs = np.unique(ordered_taxon, return_index=True)[1]
+                    ordered_taxon = [ordered_taxon[i] for i in sorted(idxs)]
+                    df_tax_filtered = df_tax_filtered.iloc[
+                        pd.Categorical(
+                            df_tax_filtered[level],
+                            categories=ordered_taxon,
+                            ordered=True,
+                        ).argsort()
+                    ]
+
+                    taxon2color = get_taxon2color(
+                        df_tax_filtered,
+                        levels_of_interest=["order", "phylum"],
+                        target_level=level,
+                    )
+                    taxon2alpha = {
+                        k: v for k, v in df_tax_filtered.genus_p.to_dict().items()
+                    }
+                    tree.taxon2marker = taxon2marker
+                    tree.taxon2color = taxon2color
+                    tree.taxon2alpha = taxon2alpha
+                    tree.nodes_to_drop = set(df_tax.index)
+                    tree.terminal_nodes = set(ordered_taxon)
+                    # reorder the dataframe rows (taxa) to match the tree
+                    taxa_other = dfs[0].index.difference(ordered_taxon).tolist()
+                    dfs = [df.loc[ordered_taxon + taxa_other] for df in dfs]
+                    linkage_row = tree
+                else:
+                    linkage_row = None
+                _heatmap(
+                    dfs,
+                    names,
+                    title=f"Taxonomy at {level} level",
+                    cbar_label=(
+                        f"log10(relative abundance)\n(range: [{vmin:.0e}, {vmax}])"
+                        if plot_type == "heatmap_log10"
+                        else "Relative abundance"
+                    ),
+                    fig=fig,
+                    axs_heatmap=axs,
+                    axs_dend=axs_dend,
+                    cmap="rocket_r",
+                    linkage_row=linkage_row,
+                    linkage_row_legend=taxon2color,
+                    vmax=np.log10(vmax) if plot_type == "heatmap_log10" else vmax,
+                    vmin=np.log10(vmin) if plot_type == "heatmap_log10" else vmin,
+                    dfs_iso=dfs_iso,
+                )
+            if plot_type in ["heatmap_binary"]:
+                # size = size[0], size[1] / 2
+                if sample_hierarchical_clustering:
+                    fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
+                    # axs_heatmap, axs_dend = axs
+                else:
+                    fig, (axs_dend, axs) = _get_subplots(
+                        num_cols, size, ratio, height_ratios=None
+                    )
+                    # axs_heatmap = axs
+                    axs_dend = [None] * num_cols
+                dfs = [(res_group > 0).astype(int).T for res_group in res_group_list]
+                df = pd.concat(dfs, axis=1)
+                if feature_hierarchical_clustering:
+                    df, linkage_row = _get_dendrogram(
+                        df, rows_to_ignore=["unknown", "others"]
+                    )
+                    dfs_temp = []
+                    i = 0
+                    for df_temp in dfs:
+                        dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                        i += df_temp.shape[1]
+                    dfs = dfs_temp
+                else:
+                    linkage_row = None
+                _heatmap(
+                    dfs,
+                    names,
+                    title=f"Taxonomy at {level} level",
+                    fig=fig,
+                    axs_heatmap=axs,
+                    axs_dend=axs_dend,
+                    cmap="BuPu",
+                    linkage_row=linkage_row,
+                )
+            if plot_type in ["heatmap_raw"]:
+                if sample_hierarchical_clustering:
+                    fig, (axs_dend, axs) = _get_subplots(num_cols, size, ratio)
+                else:
+                    fig, (axs_dend, axs) = _get_subplots(
+                        num_cols, size, ratio, height_ratios=None
+                    )
+                vmax, vmin = 1e3, 0
+                with np.errstate(divide="ignore"):
+                    dfs = [
+                        np.log10(res_group).transpose() for res_group in res_group_list
+                    ]
+                df = pd.concat(dfs, axis=1)
+                if feature_ordering == "hierarchical":
+                    df, linkage_row = _get_dendrogram(
+                        df, rows_to_ignore=["unknown", "others"]
+                    )
+                    dfs_temp = []
+                    i = 0
+                    for df_temp in dfs:
+                        dfs_temp.append(df.iloc[:, i : i + df_temp.shape[1]])
+                        i += df_temp.shape[1]
+                    dfs = dfs_temp
+                elif feature_ordering == "taxonomy_tree":
+                    df_tax_filtered = df_tax.query(f"{level}.isin(@dfs[0].index)")
+                    tree = get_taxonomy_tree(df_tax_filtered)
+                    taxon2marker = get_taxon2marker(df_tax_filtered)
+                    ordered_taxon = _calc_y(
+                        tree,
+                        df_tax_filtered,
+                        collapse_level=level,
+                        # base=dfs[0].shape[0] - len(tree.leaf_nodes()),
+                    )
+                    get_coords(
+                        tree.seed_node,
+                        max_x=tree.seed_node.distance_from_tip()
+                        + tree.seed_node.distance_from_root(),
+                    )
+                    # df_tax_filtered["temp_sort_by"] = pd.Categorical(
+                    #     df_tax_filtered[level], categories=ordered_taxon, ordered=True
+                    # )
+                    idxs = np.unique(ordered_taxon, return_index=True)[1]
+                    ordered_taxon = [ordered_taxon[i] for i in sorted(idxs)]
+                    df_tax_filtered = df_tax_filtered.iloc[
+                        pd.Categorical(
+                            df_tax_filtered[level],
+                            categories=ordered_taxon,
+                            ordered=True,
+                        ).argsort()
+                    ]
+
+                    taxon2color = get_taxon2color(
+                        df_tax_filtered,
+                        levels_of_interest=["order", "phylum"],
+                        target_level=level,
+                    )
+                    taxon2alpha = {
+                        k: v for k, v in df_tax_filtered.genus_p.to_dict().items()
+                    }
+                    tree.taxon2marker = taxon2marker
+                    tree.taxon2color = taxon2color
+                    tree.taxon2alpha = taxon2alpha
+                    tree.nodes_to_drop = set(df_tax.index)
+                    tree.terminal_nodes = set(ordered_taxon)
+                    # reorder the dataframe rows (taxa) to match the tree
+                    taxa_other = dfs[0].index.difference(ordered_taxon).tolist()
+                    dfs = [df.loc[ordered_taxon + taxa_other] for df in dfs]
+                    linkage_row = tree
+                else:
+                    linkage_row = None
+                _heatmap(
+                    dfs,
+                    names,
+                    title=f"Taxonomy at {level} level",
+                    cbar_label=f"log10(#picked isolates)\n(range: [{vmin}, {vmax:.0e}])",
+                    # cbar_label="Count",
+                    fig=fig,
+                    axs_heatmap=axs,
+                    axs_dend=axs_dend,
+                    # cmap=sns.cubehelix_palette(as_cmap=True),
+                    cmap="summer",
+                    linkage_row=linkage_row,
+                    linkage_row_legend=taxon2color,
+                    vmax=np.log10(vmax),
+                    vmin=0,
+                )
+        if fig is None:
+            raise ValueError(f"No figure is created because of invalid plot type {plot_type}.")
+        figs.append(fig)
+    return figs
 
 
 def main():
@@ -1009,7 +1464,9 @@ def main():
                         ]
 
                         taxon2color = get_taxon2color(
-                            df_tax_filtered, levels_of_interest=["order", "phylum"]
+                            df_tax_filtered,
+                            levels_of_interest=["order", "phylum"],
+                            target_level=level,
                         )
                         taxon2alpha = {
                             k: v for k, v in df_tax_filtered.genus_p.to_dict().items()
@@ -1196,7 +1653,9 @@ def main():
                         ]
 
                         taxon2color = get_taxon2color(
-                            df_tax_filtered, levels_of_interest=["order", "phylum"]
+                            df_tax_filtered,
+                            levels_of_interest=["order", "phylum"],
+                            target_level=level,
                         )
                         taxon2alpha = {
                             k: v for k, v in df_tax_filtered.genus_p.to_dict().items()
