@@ -112,7 +112,7 @@ def cat_fastq(
     directory: str,
     output_fp_r1,
     output_fp_r2=None,
-    metadata: str = None,
+    metadata: str | None = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
 ) -> None:
@@ -171,11 +171,14 @@ def cat_fastq(
     else:
         rename_read = _rename_read_illumina
 
-    for r1_path, r2_path, sample_name in tqdm(matched_pairs):
+    for idx, (r1_path, r2_path, sample_name) in enumerate(tqdm(matched_pairs)):
         if samples_in_meta is not None and sample_name not in samples_in_meta:
             continue
         if _remove_undet and sample_name == "Undetermined":
             continue
+        # if idx < 4:
+        #     continue
+        # print(sample_name)
         with smart_open(r1_path) as r1_file, smart_open(r2_path) as r2_file:
             paired_read_iter = zip(
                 zip(*[r1_file] * 4, strict=True),
@@ -198,7 +201,7 @@ def cat_fastq(
 def cat_fastq_se(
     directory: str,
     output_fp,
-    metadata: str = None,
+    metadata: str | None = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
     _r2: bool = False,

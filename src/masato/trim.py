@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import argparse
+from pathlib import Path
 
 from Bio.Seq import Seq
 
@@ -255,6 +256,145 @@ def simple_preprocess(fastq_dir: str, output_fastq: str) -> None:
     cat_fastq(fastq_dir, output_fp_r1=fastp_proc.stdin, output_fp_r2=fastp_proc.stdin)
     fastp_proc.stdin.close()
     fastp_proc.wait()
+
+
+def pseudo_merge(
+    fastq_dir: str,
+    output_fastq: str,
+    threads: int,
+    min_l1: int,
+    first_k1: int,
+    min_l2: int,
+    first_k2: int,
+    cutadapt_error: float = 0.1,
+) -> None:
+    """
+    Process all FASTQ files in a directory by performing quality trimming, adapter trimming,
+    and merging paired-end reads.
+
+    Args:
+        fastq_dir (str): Directory containing FASTQ files.
+        output_dir (str): Directory to save processed FASTQ files.
+        threads (int): Number of threads to use.
+        min_l1 (int): Minimum length for R1 reads after trimming.
+        first_k1 (int): Target length for R1 reads after trimming.
+        min_l2 (int): Minimum length for R2 reads after trimming.
+        first_k2 (int): Target length for R2 reads after trimming.
+        cutadapt_error (float): Error tolerance for cutadapt trimming.
+    """
+    output_dir = os.path.dirname(output_fastq)
+    os.makedirs(output_dir, exist_ok=True)
+    log_dir = Path(output_dir) / "trim_logs"
+    os.makedirs(log_dir, exist_ok=True)
+
+    fastp_html_r1 = log_dir / "fastp.html"
+    fastp_json_r1 = log_dir / "fastp.json"
+
+    trimmed_r1 = Path(output_dir) / "trimmed_1.fastq.gz"
+    trimmed_r2 = Path(output_dir) / "trimmed_2.fastq.gz"
+
+    # Process R1 using cat_fastq_se() directly into fastp.
+    # Unpaired or failed reads are discarded.
+    fastp_args = [
+        "fastp",
+        "--stdin",
+        "--interleaved_in",
+        "--stdout",
+        "--cut_right",
+        "--html",
+        str(fastp_html_r1),
+        "--json",
+        str(fastp_json_r1),
+        "--thread",
+        str(threads),
+    ]
+    print_command(fastp_args)
+    fastp_proc = subprocess.Popen(
+        fastp_args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # too short reads are discarded.
+    cutadapt_args = [
+        "cutadapt",
+        "--interleaved",
+        "--minimum-length",
+        f"{min_l1}:{min_l2}",
+        "--length",
+        f"{first_k1}",
+        "-L",  # there is not a long version of this argument, but it is -l for R2. This is a 4.9 feature.
+        f"{first_k2}",
+        "--pair-filter",
+        "both",
+        "-e",
+        str(cutadapt_error),
+        "-o",
+        str(trimmed_r1),
+        "-p",
+        "-",
+        "--cores",
+        str(threads),
+        "-",
+    ]
+    print_command(cutadapt_args)
+    cutadapt_proc = subprocess.Popen(
+        cutadapt_args,
+        stdin=fastp_proc.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # fastp_min_length_args = [
+    #     "fastp",
+    #     "--stdin",
+    #     "--interleaved_in",
+    #     "--out1",
+    #     str(trimmed_r1),
+    #     "--out2",  # out2 to stdout
+    #     "/dev/stdout",
+    #     "--max_len1",
+    #     str(first_k1),
+    #     "--max_len2",
+    #     str(first_k2),
+    #     "--thread",
+    #     str(threads),
+    # ]
+    # print_command(fastp_min_length_args)
+    # fastp_min_length_proc = subprocess.Popen(
+    #     fastp_min_length_args,
+    #     stdin=cutadapt_proc.stdout,
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.DEVNULL,
+    # )
+
+    seqkit_args = ["seqkit", "seq", "-rp", "-t", "DNA", "-o", str(trimmed_r2)]
+    print_command(seqkit_args)
+    seqkit_proc = subprocess.Popen(
+        seqkit_args,
+        stdin=cutadapt_proc.stdout,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Pipe R1 reads into fastp
+    cat_fastq(fastq_dir, output_fp_r1=fastp_proc.stdin)
+
+    fastp_proc.stdin.close()
+    fastp_proc.stdout.close()
+    cutadapt_proc.stdout.close()
+    seqkit_proc.wait()
+    # wait for all processes to finish
+    # fastp_proc.wait()
+    # cutadapt_proc.wait()
+    # fastp_min_length_proc.wait()
+    # seqkit_proc.wait()
+
+    # Concatenate trimmed R1 and R2
+    _merge_fastq_gz(str(trimmed_r1), str(trimmed_r2), output_fastq)
+    # os.remove(trimmed_r1)
+    # os.remove(trimmed_r2)
 
 
 def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
@@ -856,6 +996,38 @@ def merge(fastq_dir: str, output_dir: str) -> None:
             subprocess.run(" ".join(process), shell=True)
 
 
+def _merge_fastq_gz(r1: str, r2: str, output: str) -> None:
+    """
+    Merges two paired-end gzipped FASTQ files by concatenating the sequence and quality lines.
+
+    Args:
+        r1 (str): Path to the first gzipped FASTQ file (R1).
+        r2 (str): Path to the second gzipped FASTQ file (R2).
+        output (str): Path to the output merged gzipped FASTQ file.
+    """
+    if not r1.endswith(".gz") or not r2.endswith(".gz") or not output.endswith(".gz"):
+        raise ValueError("Input and output files must be gzipped FASTQ files.")
+    cmd = f"""
+paste -d'\\n' \
+<(zcat {r1} | awk 'NR%4==1') \
+<(paste -d '' <(zcat {r1} | awk 'NR%4==2') <(zcat {r2} | awk 'NR%4==2')) \
+<(zcat {r1} | awk 'NR%4==3') \
+<(paste -d '' <(zcat {r1} | awk 'NR%4==0') <(zcat {r2} | awk 'NR%4==0')) \
+| gzip -c > {output}"""
+    print_command(cmd)
+
+    subprocess.run(cmd, shell=True, executable="/bin/bash", check=True)
+
+#     cmd = f"""
+# paste <(zcat {r1} | paste - - - -) <(zcat {r2} | paste - - - -) | 
+# awk -v OFS="\\n" '{{print $1, $2$6, $3, $4$8}}' | gzip > {output}"""
+
+#     try:
+#         subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
+#     except subprocess.CalledProcessError as e:
+#         raise RuntimeError(f"Error merging FASTQ files: {e}")
+
+
 def rename_output_files(output_dir, pair):
     """Rename the output files generated by trim_galore."""
     r1_old = os.path.join(output_dir, pair[0].replace("_R1.fastq", "_R1_val_1.fq"))
@@ -930,6 +1102,7 @@ def main():
         default="simple",
         choices=[
             "simple",
+            "pseudo_merge",
             "r1",
             "isolate_150",
             "isolate_150_early_stop",
@@ -947,11 +1120,28 @@ def main():
     parser.add_argument(
         "-l", "--min_length", default=100, help="Minimum length to keep"
     )
+    parser.add_argument(
+        "-k2", "--first_k2", type=int, default=None, help="The first k bases to keep"
+    )
+    parser.add_argument(
+        "-l2", "--min_length2", default=100, help="Minimum length to keep"
+    )
 
     args = parser.parse_args()
 
     if args.mode == "simple":
         simple_preprocess(args.input_dir, args.output)
+    elif args.mode == "pseudo_merge":
+        # take first_k1 for read1, and first_k2 for read2, then merge them.
+        pseudo_merge(
+            args.input_dir,
+            args.output,
+            threads=8,
+            min_l1=args.min_length,
+            first_k1=args.first_k,
+            min_l2=args.min_length2,
+            first_k2=args.first_k2,
+        )
     elif args.mode == "isolate_150":
         # for barcode_fwd, barcode_rev and pattern, first look for them as if they are
         # normal file path, if not exist, then look for them in script_dir/../../data

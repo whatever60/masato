@@ -851,6 +851,7 @@ def workflow_per_sample(
                     f"{sample_name} both before {current_sample} and after"
                 )
             if executor:
+                import pdb; pdb.set_trace()
                 future = executor.submit(
                     _workflow_one_sample,
                     fastq_for_current_sample,
