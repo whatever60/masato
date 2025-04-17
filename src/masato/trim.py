@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 
 from Bio.Seq import Seq
+from matplotlib.pyplot import bar
 
 from masato.utils import cat_fastq, cat_fastq_se, smart_open, print_command
 
@@ -444,12 +445,12 @@ def get_primer_set(name: str) -> tuple[str, str | None] | dict[str, str] | str:
     # elif name == "maps_0":
     #     # optional
     #     return f"{PRIMER_MAPS_0}...{get_rc(PRIMER_MAPS_r)}", None
-    elif name == "maps_1":
+    elif name == "maps_round1":
         # anchor
         return f"^{PRIMER_MAPS_1};required...{get_rc(PRIMER_MAPS_r)};optional", get_rc(
             PRIMER_MAPS_1
         )
-    elif name == "maps_2":
+    elif name == "maps_round2":
         # anchor
         return f"^{PRIMER_MAPS_2}", None
     elif name == "maps_3":
@@ -649,6 +650,9 @@ def cutadapt_demux_merge_trim_se(
     output_fastq: str,
     primer_set: str,
     barcode_fastq: str,
+    first_k: int | None = None,
+    min_length: int | None = None,
+    _r2: bool = False,
 ) -> None:
     """Demultiplex and merge single-end reads using cutadapt."""
     if not os.path.isfile(barcode_fastq):
@@ -689,8 +693,8 @@ def cutadapt_demux_merge_trim_se(
         cutadapt_demux_proc.stdin.close()
         cutadapt_demux_proc.wait()
     else:
-        print_command(proc_args)
         proc_args.append(fastq_path)
+        print_command(proc_args)
         subprocess.run(proc_args)
 
     # no need for renaming
@@ -705,22 +709,35 @@ def cutadapt_demux_merge_trim_se(
     )
 
     a, _ = get_primer_set(primer_set)
+    cutadapt_trim_proc_args = [
+        "cutadapt",
+        # "-a" if "..." in a else "-g",
+        "-g",
+        a,
+        "-o",
+        output_fastq,
+        "--untrimmed-output",
+        os.path.join(output_dir_cutadapt, "untrimmed.fq.gz"),
+        # "--too-short-output",
+        # os.path.join(output_dir_cutadapt, "too_short.fq.gz"),
+        "--cores",
+        "8",
+        "-",
+    ]
+    if first_k is not None:
+        cutadapt_trim_proc_args.extend(["-l", str(first_k)])
+    if min_length is not None:
+        cutadapt_trim_proc_args.extend(
+            [
+                "--minimum-length",
+                str(min_length),
+                "--too-short-output",
+                os.path.join(output_dir_cutadapt, "too_short_1.fq.gz"),
+            ]
+        )
+    print_command(cutadapt_trim_proc_args)
     cutadapt_trim_proc = subprocess.Popen(
-        [
-            "cutadapt",
-            # "-a" if "..." in a else "-g",
-            "-g",
-            a,
-            "-o",
-            output_fastq,
-            "--untrimmed-output",
-            os.path.join(output_dir_cutadapt, "untrimmed.fq.gz"),
-            # "--too-short-output",
-            # os.path.join(output_dir_cutadapt, "too_short.fq.gz"),
-            "--cores",
-            "8",
-            "-",
-        ],
+        cutadapt_trim_proc_args,
         stdin=subprocess.PIPE,
         # silence cutadapt's output
         stdout=subprocess.DEVNULL,
@@ -730,6 +747,7 @@ def cutadapt_demux_merge_trim_se(
         output_dir_demux,
         output_fp=cutadapt_trim_proc.stdin,
         _have_sample_name=True,
+        _r2=_r2,
     )
     cutadapt_trim_proc.stdin.close()
     cutadapt_trim_proc.wait()
@@ -843,8 +861,8 @@ def cutadapt_merge_trim_se(
     fastq_path: str,
     output_fastq: str,
     primer_set: str,
-    first_k: int = None,
-    min_length: int = None,
+    first_k: int | None = None,
+    min_length: int | None = None,
     _r2: bool = False,
 ) -> None:
     output_dir, output_f = os.path.split(output_fastq)
@@ -852,7 +870,7 @@ def cutadapt_merge_trim_se(
     a, A = get_primer_set(primer_set)
     proc_args = [
         "cutadapt",
-        "-g" if primer_set.endswith("_5") == "fwd" else "-a",
+        "-g" if primer_set.endswith("_5") else "-a",
         a,
         "-o",
         output_fastq,
@@ -1018,8 +1036,9 @@ paste -d'\\n' \
 
     subprocess.run(cmd, shell=True, executable="/bin/bash", check=True)
 
+
 #     cmd = f"""
-# paste <(zcat {r1} | paste - - - -) <(zcat {r2} | paste - - - -) | 
+# paste <(zcat {r1} | paste - - - -) <(zcat {r2} | paste - - - -) |
 # awk -v OFS="\\n" '{{print $1, $2$6, $3, $4$8}}' | gzip > {output}"""
 
 #     try:
@@ -1049,6 +1068,20 @@ def rename_output_files(output_dir, pair):
         os.rename(r2_old, r2_new)
 
 
+def resolve_input_path(input_path: str) -> str:
+    """Resolve the input path relative to the 'data' directory if not an existing file.
+
+    Args:
+        input_path: A path string or None. If not None and not a file, assume it is relative to the 'data' directory.
+
+    Returns:
+        The resolved absolute path or None.
+    """
+    if not os.path.isfile(input_path):
+        return os.path.join(os.path.dirname(__file__), "data", input_path)
+    return input_path
+
+
 # if __name__ == "__main__":
 def main():
     parser = argparse.ArgumentParser(
@@ -1072,7 +1105,7 @@ def main():
         "-p",
         "--primer_set",
         type=str,
-        choices=["its", "16s"],
+        choices=["its", "16s", "maps_round1", "maps_round2"],
         help="Primer set used",
     )
     parser.add_argument(
@@ -1104,6 +1137,7 @@ def main():
             "simple",
             "pseudo_merge",
             "r1",
+            "r1_demux_trim",
             "isolate_150",
             "isolate_150_early_stop",
             "maps_round0",
@@ -1118,13 +1152,13 @@ def main():
         "-k", "--first_k", type=int, default=None, help="The first k bases to keep"
     )
     parser.add_argument(
-        "-l", "--min_length", default=100, help="Minimum length to keep"
+        "-l", "--min_length", type=int, default=None, help="Minimum length to keep"
     )
     parser.add_argument(
         "-k2", "--first_k2", type=int, default=None, help="The first k bases to keep"
     )
     parser.add_argument(
-        "-l2", "--min_length2", default=100, help="Minimum length to keep"
+        "-l2", "--min_length2", type=int, default=None, help="Minimum length to keep"
     )
 
     args = parser.parse_args()
@@ -1144,24 +1178,10 @@ def main():
         )
     elif args.mode == "isolate_150":
         # for barcode_fwd, barcode_rev and pattern, first look for them as if they are
-        # normal file path, if not exist, then look for them in script_dir/../../data
-        if args.barcode_fwd is not None and not os.path.isfile(args.barcode_fwd):
-            barcode_fwd = os.path.join(
-                os.path.dirname(__file__), "data", args.barcode_fwd
-            )
-        else:
-            barcode_fwd = args.barcode_fwd
-        if args.barcode_rev is not None and not os.path.isfile(args.barcode_rev):
-            barcode_rev = os.path.join(
-                os.path.dirname(__file__), "data", args.barcode_rev
-            )
-        else:
-            barcode_rev = args.barcode_rev
-        if args.pattern is not None and not os.path.isfile(args.pattern):
-            pattern = os.path.join(os.path.dirname(__file__), "data", args.pattern)
-        else:
-            pattern = args.pattern
-
+        # normal file path, if not exist, then look for them in script_dir/../../data.
+        barcode_fwd = resolve_input_path(args.barcode_fwd)
+        barcode_rev = resolve_input_path(args.barcode_rev)
+        pattern = resolve_input_path(args.pattern)
         isolate_150_preprocess(
             args.input_dir,
             barcode_fwd,
@@ -1192,11 +1212,15 @@ def main():
             first_k=args.first_k,
             min_length=args.min_length,
         )
-    elif args.mode == "maps_round0":
-        cutadapt_merge_trim_se(
+    elif args.mode == "r1_demux_trim":
+        barcode_fwd = resolve_input_path(args.barcode_fwd)
+        cutadapt_demux_merge_trim_se(
             args.input_dir,
             args.output,
-            primer_set="maps_0",
+            primer_set=args.primer_set,
+            barcode_fastq=barcode_fwd,
+            first_k=args.first_k,
+            min_length=args.min_length,
         )
     elif args.mode == "maps_round1":
         cutadapt_demux_merge_trim_se(
