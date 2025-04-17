@@ -25,20 +25,26 @@ def _read_isolate_metadata(isolate_metadata_dir: str) -> pd.DataFrame:
 
 
 def read_isolate_metadata_rich(
-    isolate_metadata_dir: str, plate_metadata_path: str
+    isolate_metadata_dir: str, plate_metadata_path: str | None = None
 ) -> pd.DataFrame:
-    plate_metadata = pd.read_csv(plate_metadata_path)
-    if not plate_metadata.barcode.is_unique:
-        raise ValueError("Plate metadata barcode column is not unique")
     isolate_metadata = _read_isolate_metadata(isolate_metadata_dir)
     isolate_metadata.columns = ["picking_coord", "src_plate", "dest_well", "dest_plate"]
-    isolate_metadata = isolate_metadata.merge(
-        plate_metadata[
-            ["barcode", "medium_type", "sample_type", "plate_name", "sample_group"]
-        ].rename({"barcode": "src_plate"}, axis=1),
-        on="src_plate",
-        how="left",
-    )
+    if plate_metadata_path is not None:
+        plate_metadata = pd.read_csv(plate_metadata_path)
+        if not plate_metadata.barcode.is_unique:
+            raise ValueError("Plate metadata barcode column is not unique")
+        isolate_metadata = isolate_metadata.merge(
+            plate_metadata[
+                ["barcode", "medium_type", "sample_type", "plate_name", "sample_group"]
+            ].rename({"barcode": "src_plate"}, axis=1),
+            on="src_plate",
+            how="left",
+        )
+    else:
+        isolate_metadata["medium_type"] = "unknown"
+        isolate_metadata["sample_type"] = "unknown"
+        isolate_metadata["plate_name"] = "unknown"
+        isolate_metadata["sample_group"] = "unknown"
     isolate_metadata["dest_well_barcode"] = (
         isolate_metadata.dest_plate + "_" + isolate_metadata.dest_well
     )
@@ -54,6 +60,7 @@ def read_isolate_metadata_rich(
     return isolate_metadata.sort_values(
         ["sample_group", "sample_type", "medium_type", "src_plate", "sample"]
     ).set_index("sample")
+
 
 
 def get_top_cols(
@@ -89,10 +96,10 @@ def _calc_purity(
 
 
 def get_isolate_purity(
-    df_zotu_cb: pd.DataFrame = None,
-    df_zotu_cf: pd.DataFrame = None,
-    df_taxonomy_b: pd.DataFrame = None,
-    df_taxonomy_f: pd.DataFrame = None,
+    df_zotu_cb: pd.DataFrame | None = None,
+    df_zotu_cf: pd.DataFrame | None = None,
+    df_taxonomy_b: pd.DataFrame | None = None,
+    df_taxonomy_f: pd.DataFrame | None = None,
     levels: list = ["otu"],
 ) -> dict[str, list]:
     """Get purity table for multiple input count tables and the combined count table at
