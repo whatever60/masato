@@ -526,6 +526,7 @@ def unoise3(
     input_fastq: str | IO[str] | gzip.GzipFile,
     output_fasta: str | IO[str] | gzip.GzipFile | None,
     min_size: int,
+    min_length: int,
     relabel_prefix: str | None = None,
     size_out: bool = False,
     num_threads: int = 16,
@@ -544,7 +545,7 @@ def unoise3(
         "--fastq_maxee",
         "0.5",
         "--fastq_minlen",
-        "100",
+        str(min_length),
         "--fastq_maxns",
         "0",
         "--relabel",
@@ -755,7 +756,7 @@ def _decide_io_arg(arg) -> tuple:
 def _workflow_one_sample(
     seqs_sample: list[str],
     min_size: int,
-    prefix: str = None,
+    prefix: str | None = None,
     search: bool = True,
 ) -> tuple[list[str], list[str], list[int]]:
     num_qs = len(seqs_sample)
@@ -839,10 +840,10 @@ def workflow_per_sample(
         if num_threads > 1
         else None
     )
-    f = smart_open(input_fastq, "r")
+    f: IO[str] = smart_open(input_fastq, "r")
     for entry in zip(f, f, f, f):
         # Parse the header line to extract the sample name
-        header = entry[0]
+        header: str = entry[0]
         sample_name = header.split()[0].split("=")[1].strip()
         if sample_name != current_sample and fastq_for_current_sample:
             if sample_name in samples:
@@ -1382,6 +1383,13 @@ def main():
         "-m", "--minsize", type=int, default=8, help="Minimum cluster size"
     )
     unoise3_parser.add_argument(
+        "-l",
+        "--min_length",
+        type=int,
+        default=100,
+        help="Minimum length of sequences to cluster",
+    )
+    unoise3_parser.add_argument(
         "-l", "--relabel_prefix", type=str, default=None, help="Prefix for ZOTU labels"
     )
     unoise3_parser.add_argument(
@@ -1510,6 +1518,7 @@ def main():
             args.input_fastq,
             args.output_fasta,
             min_size=args.minsize,
+            min_length=args.min_length,
             relabel_prefix=args.relabel_prefix,
             num_threads=args.num_threads,
         )
