@@ -11,12 +11,12 @@ import biom
 from tqdm.auto import tqdm
 
 
-PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_L\d{3}_(R[12])_001.f(ast)?q(.gz)?$")
+PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_(?:L\d{3}_)?(R[12])_001.f(ast)?q(.gz)?$")
 # - sample_R1.fq.gz or sample_R2.fq.gz (or fastq.gz, same for the following)
 # - sample_1.fq.gz or sample_2.fq.gz
 # - sample.R1.fq.gz or sample.R2.fq.gz
 # - sample.1.fq.gz or sample.2.fq.gz
-PATTERN_CUSTOM = re.compile(r"^(.+?)(?:_|\.)((?:R)?[12]).f(ast)?q(.gz)?$")
+PATTERN_CUSTOM = re.compile(r"^(.+?)(?:(?:_|\.)(?:R)?[12])?.f(ast)?q(.gz)?$")
 
 
 def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
@@ -223,16 +223,16 @@ def cat_fastq_se(
             match = pattern.search(os.path.basename(file_))
             if match:
                 sample_name, read_type = match.groups()[:2]
-                read_type = {"1": "R1", "2": "R2"}.get(read_type, read_type)
+                read_type = {None: "R1", "1": "R1", "2": "R2"}.get(read_type, read_type)
                 if read_type not in ["R1", "R2"]:
-                    warnings.warn(f"Invalid read type for file: {file_}")
+                    warnings.warn(f"Invalid read type {read_type} for file: {file_}")
                     continue
                 if _r2:
                     if read_type == "R1":
-                        continue
+                        break
                 else:
                     if read_type == "R2":
-                        continue
+                        break
                 files.append((file_, sample_name, read_type))
                 break
 
