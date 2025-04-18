@@ -16,7 +16,7 @@ PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_(?:L\d{3}_)?(R[12])_001.f(ast)?q(.gz
 # - sample_1.fq.gz or sample_2.fq.gz
 # - sample.R1.fq.gz or sample.R2.fq.gz
 # - sample.1.fq.gz or sample.2.fq.gz
-PATTERN_CUSTOM = re.compile(r"^(.+?)(?:(?:_|\.)(?:R)?[12])?.f(ast)?q(.gz)?$")
+PATTERN_CUSTOM = re.compile(r"^(.+?)(?:(?:_|\.)(?:R)?[12])?.f(?:ast)?q(?:.gz)?$")
 
 
 def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
@@ -259,7 +259,8 @@ def cat_fastq_se(
     else:
         rename_read = _rename_read_illumina
 
-    for file_, sample_name, read_type in tqdm(files):
+    prog_bar = tqdm(files)
+    for file_, sample_name, read_type in prog_bar:
         # match = PATTERN_ILLUMINA.search(os.path.basename(file_))
         # if match:
         # sample_name = match.group(1)

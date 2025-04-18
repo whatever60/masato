@@ -125,8 +125,8 @@ def extract_info_from_xml(xml_string: str, email: str = "") -> pd.DataFrame:
                         )
                     )
     df = pd.DataFrame(records)
-    acc2tax = fetch_taxonomy_ids(df["saccession"].unique(), email)
-    df["staxids"] = df["saccession"].map(acc2tax)
+    acc2tax = fetch_taxonomy_ids(list(map(str, df["saccession"].unique())), email)
+    df["staxids"] = df["saccession"].replace(acc2tax)
     return df
 
 
@@ -210,7 +210,8 @@ def blast_local(input_path: str, database: str) -> pd.DataFrame:
     sp = subprocess.Popen(
         blast_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )  # blast = sp.communicate()
-    err = sp.stderr.read()
+    stdout, stderr = sp.communicate()
+    err = stderr.decode() if stderr else ""
     if err:
         print(err)
         print("ERROR: with blast above")
@@ -252,14 +253,14 @@ def merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return merged
 
 
-def calculate_coverage(ranges: tuple[int, int], qlen: int) -> float:
+def calculate_coverage(ranges: list[tuple[int, int]], qlen: int) -> float:
     """Calculate the exact query coverage based on merged ranges and query length."""
     coverage = sum(end - start + 1 for start, end in ranges) / qlen
     return coverage * 100  # Convert to percentage
 
 
 @singledispatch
-def add_query_coverage(df):
+def add_query_coverage(df) -> pd.DataFrame | pl.DataFrame:
     raise NotImplementedError("Unsupported type")
 
 
