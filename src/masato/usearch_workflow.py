@@ -1383,7 +1383,6 @@ def main():
         "-m", "--minsize", type=int, default=8, help="Minimum cluster size"
     )
     unoise3_parser.add_argument(
-        "-l",
         "--min_length",
         type=int,
         default=100,
