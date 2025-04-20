@@ -77,7 +77,11 @@ def read_table(
                 var = pd.DataFrame(index=table_biom.ids(axis="observation"))
 
             matrix = table_biom.matrix_data.T.astype(dtype)
-            return ad.AnnData(X=matrix, obs=obs, var=var)
+            adata = ad.AnnData(X=matrix, obs=obs, var=var)
+            adata.var.index.name = (
+                table_biom.table_id if index_name is None else index_name
+            )
+            return adata
 
         if return_type == "df":  # biom -> DataFrame (dense)
             if should_warn_metadata_loss(table_biom):
@@ -154,8 +158,8 @@ def write_table(table: pd.DataFrame | ad.AnnData | biom.Table, table_path: str) 
                 matrix,
                 observation_ids=table.var_names.to_list(),
                 sample_ids=table.obs_names.to_list(),
-                observation_metadata=table.var,
-                sample_metadata=table.obs,
+                observation_metadata=table.var.values.tolist(),
+                sample_metadata=table.obs.values.tolist(),
                 table_id=table.var.index.name,
             )
         elif isinstance(table, pd.DataFrame):
