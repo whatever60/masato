@@ -7,8 +7,9 @@ import warnings
 from typing import IO
 
 import pandas as pd
-import biom
 from tqdm.auto import tqdm
+
+from .io import read_table, write_table
 
 
 PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_(?:L\d{3}_)?(R[12])_001.f(ast)?q(.gz)?$")
@@ -327,54 +328,54 @@ def print_command(command: str | list[str]) -> None:
         print()
 
 
-def read_table(
-    table_path: str,
-    index_col: str | int = 0,
-    comment: str = None,
-    dtype: str = "int",
-    index_name: str = None,
-) -> pd.DataFrame:
-    """Read a table from a file and return it as a DataFrame.
+# def read_table(
+#     table_path: str,
+#     index_col: str | int = 0,
+#     comment: str = None,
+#     dtype: str = "int",
+#     index_name: str = None,
+# ) -> pd.DataFrame:
+#     """Read a table from a file and return it as a DataFrame.
 
-    Args:
-        table_path: Path to the table file. Could be a tsv, csv or biom.
+#     Args:
+#         table_path: Path to the table file. Could be a tsv, csv or biom.
 
-    Returns:
-        pd.DataFrame: DataFrame containing the table data.
-    """
-    if table_path.endswith(".biom"):
-        df_biom = biom.load_table(table_path)
-        df = df_biom.to_dataframe().astype(dtype)
-        df.index.name = df_biom.table_id if index_name is None else index_name
-        return df
-    else:
-        if table_path.endswith(".csv") or table_path.endswith(".csv.gz"):
-            method = pd.read_csv
-        elif table_path.endswith(".tsv") or table_path.endswith(".tsv.gz"):
-            method = pd.read_table
-        else:
-            raise ValueError("Unsupported table file format.")
-        return method(
-            table_path, index_col=index_col, comment=comment, dtype={index_col: str}
-        )
+#     Returns:
+#         pd.DataFrame: DataFrame containing the table data.
+#     """
+#     if table_path.endswith(".biom"):
+#         df_biom = biom.load_table(table_path)
+#         df = df_biom.to_dataframe().astype(dtype)
+#         df.index.name = df_biom.table_id if index_name is None else index_name
+#         return df
+#     else:
+#         if table_path.endswith(".csv") or table_path.endswith(".csv.gz"):
+#             method = pd.read_csv
+#         elif table_path.endswith(".tsv") or table_path.endswith(".tsv.gz"):
+#             method = pd.read_table
+#         else:
+#             raise ValueError("Unsupported table file format.")
+#         return method(
+#             table_path, index_col=index_col, comment=comment, dtype={index_col: str}
+#         )
 
 
-def write_table(table: pd.DataFrame, table_path: str) -> None:
-    """Write a table to a file.
+# def write_table(table: pd.DataFrame, table_path: str) -> None:
+#     """Write a table to a file.
 
-    Args:
-        table: DataFrame to be written to a file.
-        table_path: Path to the output file. Could be a tsv, csv or biom.
-    """
-    if table_path.endswith(".biom"):
-        data = biom.Table(
-            table.to_numpy(), table.index, table.columns, table_id=table.index.name
-        )
-        with biom.util.biom_open(table_path, "w") as f:
-            data.to_hdf5(f, "whatever60")
-    elif table_path.endswith(".csv") or table_path.endswith(".csv.gz"):
-        table.to_csv(table_path)
-    elif table_path.endswith(".tsv") or table_path.endswith(".tsv.gz"):
-        table.to_csv(table_path, sep="\t")
-    else:
-        raise ValueError("Unsupported table file format.")
+#     Args:
+#         table: DataFrame to be written to a file.
+#         table_path: Path to the output file. Could be a tsv, csv or biom.
+#     """
+#     if table_path.endswith(".biom"):
+#         data = biom.Table(
+#             table.to_numpy(), table.index, table.columns, table_id=table.index.name
+#         )
+#         with biom.util.biom_open(table_path, "w") as f:
+#             data.to_hdf5(f, "whatever60")
+#     elif table_path.endswith(".csv") or table_path.endswith(".csv.gz"):
+#         table.to_csv(table_path)
+#     elif table_path.endswith(".tsv") or table_path.endswith(".tsv.gz"):
+#         table.to_csv(table_path, sep="\t")
+#     else:
+#         raise ValueError("Unsupported table file format.")

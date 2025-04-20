@@ -13,11 +13,15 @@ from concurrent.futures import as_completed
 import json
 from collections import defaultdict
 
+import numpy as np
+from scipy import sparse as ss
 import pandas as pd
 from loky import get_reusable_executor
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
+import biom
+import anndata as ad
 from tqdm.auto import tqdm
 
 from masato.utils import read_table, write_table
@@ -330,9 +334,11 @@ def subsample(
     # Begin subsampling
     subsample_metadata = []
     for sample_name, row in tqdm(df_meta.iterrows(), total=len(df_meta)):
-        read_count = min(row["read_count_subsample"], row["read_count"])
+        read_count = min(int(row["read_count_subsample"]), int(row["read_count"]))
         num_subs = (
-            num_subsamples if row["read_count_subsample"] < row["read_count"] else 1
+            num_subsamples
+            if int(row["read_count_subsample"]) < int(row["read_count"])
+            else 1
         )
         del row["read_count_subsample"], row["read_count"]
         ps = []
@@ -379,8 +385,11 @@ def subsample(
 
 
 def db_construct(
-    input_fastx: str, output_fasta: str, num_threads: int, backend: str = "vsearch"
-) -> str:
+    input_fastx: str,
+    output_fasta: str | None,
+    num_threads: int,
+    backend: str = "vsearch",
+) -> str | None:
     """Output fasta is default to be modified from input fastq, but can be specified.
     For example, if input fastq file is /data/merged.filtered.fq.gz, then output fasta
     will be /data/merged.uniq.fa.gz, unless otherwise specified.
@@ -391,6 +400,8 @@ def db_construct(
         output_path = f"{output_dir}/{base_name_noext}.uniq.fa"
     else:
         output_path = output_fasta.rstrip(".gz")
+        output_dir = os.path.dirname(output_path)
+        base_name_noext = os.path.basename(output_path).split(".")[0]
 
     if backend == "usearch":
         subprocess.run(
@@ -526,13 +537,13 @@ def unoise3(
     input_fastq: str | IO[str] | gzip.GzipFile,
     output_fasta: str | IO[str] | gzip.GzipFile | None,
     min_size: int,
-    min_length: int,
+    min_length: int = 0,
     relabel_prefix: str | None = None,
     size_out: bool = False,
     num_threads: int = 16,
     stderr: bool = True,
 ) -> None | str:
-    stderr = subprocess.DEVNULL if not stderr else None
+    stderr_ = subprocess.DEVNULL if not stderr else None
     input_arg, stdin = _decide_io_arg(input_fastq)
     output_arg, stdout = _decide_io_arg(output_fasta)
 
@@ -558,7 +569,7 @@ def unoise3(
         args_qc,
         stdin=stdin,
         stdout=subprocess.PIPE,
-        stderr=stderr,
+        stderr=stderr_,
     )
 
     args_uniq = [
@@ -571,7 +582,7 @@ def unoise3(
     ]
     # print_command(args_uniq)
     uniq_proc = subprocess.Popen(
-        args_uniq, stdin=qc_proc.stdout, stdout=subprocess.PIPE, stderr=stderr
+        args_uniq, stdin=qc_proc.stdout, stdout=subprocess.PIPE, stderr=stderr_
     )
 
     args_unoise3 = [
@@ -588,7 +599,7 @@ def unoise3(
     ]
     # print_command(args_unoise3)
     unoise3_proc = subprocess.Popen(
-        args_unoise3, stdin=uniq_proc.stdout, stdout=subprocess.PIPE, stderr=stderr
+        args_unoise3, stdin=uniq_proc.stdout, stdout=subprocess.PIPE, stderr=stderr_
     )
 
     args_uchime3 = [
@@ -603,14 +614,24 @@ def unoise3(
     if size_out:
         args_uchime3.append("--sizeout")
     uchime3_proc = subprocess.Popen(
-        args_uchime3, stdin=unoise3_proc.stdout, stdout=stdout, stderr=stderr
+        args_uchime3, stdin=unoise3_proc.stdout, stdout=stdout, stderr=stderr_
     )
 
-    qc_proc.stdout.close()
-    uniq_proc.stdout.close()
-    unoise3_proc.stdout.close()
+    if qc_proc.stdout is not None:
+        qc_proc.stdout.close()
+    if uniq_proc.stdout is not None:
+        uniq_proc.stdout.close()
+    if unoise3_proc.stdout is not None:
+        unoise3_proc.stdout.close()
     if stdin is subprocess.PIPE:
-        qc_proc.communicate(input_fastq.encode())
+        if isinstance(input_fastq, str):
+            qc_proc.communicate(input_fastq.encode())
+        else:
+            # If input_fastq is a file-like object, we shouldn't reach here
+            # because _decide_io_arg would have set stdin to input_fastq, not PIPE
+            raise TypeError(
+                f"Expected input_fastq to be str when stdin is PIPE, got {type(input_fastq)}"
+            )
     uchime3_out, _ = uchime3_proc.communicate()
     if stdout is subprocess.PIPE:
         return uchime3_out.decode()
@@ -690,10 +711,22 @@ def search_global(
         return sg_proc_out.decode()
 
 
+def csr_vappend(a: ss.csr_matrix, b: ss.csr_matrix) -> ss.csr_matrix:
+    """Takes in 2 csr_matrices and appends the second one to the bottom of the first one.
+    Much faster than scipy.sparse.vstack but assumes the type to be csr and overwrites
+    the first matrix instead of copying it. The data, indices, and indptr still get copied."""
+
+    a.data = np.hstack((a.data, b.data))
+    a.indices = np.hstack((a.indices, b.indices))
+    a.indptr = np.hstack((a.indptr, (b.indptr + a.nnz)[1:]))
+    a._shape = (a.shape[0] + b.shape[0], b.shape[1])
+    return a
+
+
 def search_global_add_unknown(
     input_fastq: str,
     zotu_fasta: str,
-    output_tsv: str,
+    output_path: str,
     id_: float,
     unknown_name: str,
     num_threads: int,
@@ -702,26 +735,41 @@ def search_global_add_unknown(
         raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
     if not os.path.isfile(input_fastq):
         raise ValueError(f"Query fastq file {input_fastq} does not exist")
-    if output_tsv is None:
+    if output_path is None:
         output_dir = os.path.dirname(input_fastq)
         output_tsv = os.path.join(output_dir, "unoise3_zotu.biom")
     else:
-        output_dir = os.path.dirname(output_tsv)
+        output_dir = os.path.dirname(output_path)
         os.makedirs(output_dir, exist_ok=True)
     output_not_matched = os.path.join(output_dir, "notmatched.fa")
 
     search_global(
-        input_fastq, zotu_fasta, output_tsv, output_not_matched, id_, num_threads
+        input_fastq, zotu_fasta, output_path, output_not_matched, id_, num_threads
     )
+    _add_unknown(output_path, output_not_matched, unknown_name, output_path)
 
+
+def _add_unknown(
+    input_path: str, output_not_matched: str, unknown_name: str, output_path: str
+) -> None:
     # add a ZOTU_UNKNOWN to the zotu table by counting the number of reads that do not
     # matched to anything in database
-    zotu_table = read_table(output_tsv)
-    counter = {i: 0 for i in zotu_table.columns}
+    zotu_table: ad.AnnData = read_table(input_path, return_type="adata")
+    matrix_data: ss.csr_matrix = zotu_table.X
+    samples = zotu_table.obs_names
+    counter = {i: 0 for i in samples}
     for record in SeqIO.parse(output_not_matched, "fasta"):
         counter[record.id.split("=")[1]] += 1
-    zotu_table.loc[unknown_name] = pd.Series(counter)
-    write_table(zotu_table, output_tsv)
+
+    matrix_data = ss.hstack(
+        [matrix_data, ss.csr_matrix([counter[i] for i in samples]).T], format="csr"
+    )
+    obs = zotu_table.obs
+    var_ = pd.concat(
+        [zotu_table.var, pd.DataFrame(index=[unknown_name], dtype=matrix_data.dtype)]
+    )
+    zotu_table = ad.AnnData(matrix_data, obs=obs, var=var_)
+    write_table(zotu_table, output_path)
 
 
 def _decide_io_arg(arg) -> tuple:
