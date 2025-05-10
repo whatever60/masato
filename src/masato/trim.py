@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import argparse
 from pathlib import Path
+import resource
 
 from Bio.Seq import Seq
 from matplotlib.pyplot import bar
@@ -21,7 +22,7 @@ def get_rc(seq: str) -> str:
 PRIMER_ITS_5 = "GTACCTGCGGARGGATCA"
 PRIMER_ITS_7 = "ATGAGATCCRTTGYTRAAAGTT"
 PRIMER_16S_5 = "GTGTGYCAGCMGCCGCGGTAA"
-PRIMER_16S_7 = "CCGGACTACNVGGGTWTCTAAT"
+PRIMER_16S_7 = "GGACTACNVGGGTWTCTAAT"
 PRIMER_16S_V3V4_341F = "CCTACGGGNGGCWGCAG"
 PRIMER_16S_V3V4_805R = "GACTACHVGGGTATCTAATCC"
 PRIMER_TN5 = "AGATGTGTATAAGAGACAG"
@@ -37,6 +38,11 @@ ECREC_DR = "GTGTTCCCCGCGCCAGCGGGGATAAACC"
 ECREC_LEADER = "CTGGCTTAAAAAATCATTAATTAATAATAGGTTATGTTTAGA"
 RECORDING_PRIMER_3 = "AGATCGGAAGAGCACACGTCTGA"
 RECORDING_PRIMER_5 = "CCTACACGACGCTCTTCCGATCT"
+
+
+def set_nofile_limit():
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (100000, min(100000, hard)))
 
 
 def run_trim_galore(input_dir, output_dir, pair):
@@ -394,8 +400,8 @@ def pseudo_merge(
 
     # Concatenate trimmed R1 and R2
     _merge_fastq_gz(str(trimmed_r1), str(trimmed_r2), output_fastq)
-    # os.remove(trimmed_r1)
-    # os.remove(trimmed_r2)
+    os.remove(trimmed_r1)
+    os.remove(trimmed_r2)
 
 
 def rename_files_with_mmv(file_dir: str, patterns_file: str) -> None:
@@ -447,9 +453,7 @@ def get_primer_set(name: str) -> tuple[str, str | None] | dict[str, str] | str:
     #     return f"{PRIMER_MAPS_0}...{get_rc(PRIMER_MAPS_r)}", None
     elif name == "maps_round1":
         # anchor
-        return f"^{PRIMER_MAPS_1};required...{get_rc(PRIMER_MAPS_r)};optional", get_rc(
-            PRIMER_MAPS_1
-        )
+        return f"^{PRIMER_MAPS_1}", None
     elif name == "maps_round2":
         # anchor
         return f"^{PRIMER_MAPS_2}", None
@@ -747,7 +751,6 @@ def cutadapt_demux_merge_trim_se(
         output_dir_demux,
         output_fp=cutadapt_trim_proc.stdin,
         _have_sample_name=True,
-        _r2=_r2,
     )
     cutadapt_trim_proc.stdin.close()
     cutadapt_trim_proc.wait()
