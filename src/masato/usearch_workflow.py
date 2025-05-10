@@ -537,6 +537,7 @@ def unoise3(
     input_fastq: str | IO[str] | gzip.GzipFile,
     output_fasta: str | IO[str] | gzip.GzipFile | None,
     min_size: int,
+    alpha: float = 2.0,
     min_length: int = 0,
     relabel_prefix: str | None = None,
     size_out: bool = False,
@@ -591,6 +592,8 @@ def unoise3(
         "-",
         "--minsize",
         str(min_size),
+        "--unoise_alpha",
+        str(alpha),
         "--sizeout",
         "--centroids",
         "-",
@@ -804,6 +807,7 @@ def _decide_io_arg(arg) -> tuple:
 def _workflow_one_sample(
     seqs_sample: list[str],
     min_size: int,
+    alpha: float,
     prefix: str | None = None,
     search: bool = True,
 ) -> tuple[list[str], list[str], list[int]]:
@@ -814,6 +818,7 @@ def _workflow_one_sample(
         input_fastq,
         db_fasta.name,
         min_size=min_size,
+        alpha=alpha,
         relabel_prefix=prefix,
         size_out=False,
         num_threads=1,
@@ -854,6 +859,7 @@ def workflow_per_sample(
     input_fastq: str,
     output_path: str,
     min_size: int,
+    alpha: float,
     prefix: str | None = None,
     num_threads: int = 8,
     search: bool = True,
@@ -911,7 +917,7 @@ def workflow_per_sample(
                 # sample2future[current_sample] = future
             else:
                 results[current_sample] = _workflow_one_sample(
-                    fastq_for_current_sample, min_size, prefix, search
+                    fastq_for_current_sample, min_size, alpha, prefix, search
                 )
             fastq_for_current_sample = []  # Reset for the next sample
             samples.add(current_sample)
@@ -922,7 +928,12 @@ def workflow_per_sample(
     if fastq_for_current_sample:
         if executor:
             future = executor.submit(
-                _workflow_one_sample, fastq_for_current_sample, min_size, prefix, search
+                _workflow_one_sample,
+                fastq_for_current_sample,
+                min_size,
+                alpha,
+                prefix,
+                search,
             )
             future2sample[future] = current_sample
             # sample2future[current_sample] = future
@@ -933,7 +944,7 @@ def workflow_per_sample(
             results = {s: results[s] for s in samples}
         else:
             results[current_sample] = _workflow_one_sample(
-                fastq_for_current_sample, min_size, prefix, search
+                fastq_for_current_sample, min_size, alpha, prefix, search
             )
     # Assuming each task's result could be aggregated into a final result dictionary
     # This step depends on how you implement the process_queue and task results handling
@@ -1430,6 +1441,8 @@ def main():
     unoise3_parser.add_argument(
         "-m", "--minsize", type=int, default=8, help="Minimum cluster size"
     )
+    unoise3_parser.add_argument("-a", "--alpha", type=float, default=2.0)
+
     unoise3_parser.add_argument(
         "--min_length",
         type=int,
