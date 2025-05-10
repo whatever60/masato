@@ -8,6 +8,8 @@ import argparse
 import subprocess
 import os
 
+from ..utils import print_command
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -16,7 +18,9 @@ def main():
     )
     args = parser.parse_args()
     flavor = args.flavor
-    requirement_file = f"{os.path.dirname(__file__)}/../data/conda_requirements.txt"
+    requirement_file = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "data", "conda_requirements.txt")
+    )
     args = [
         flavor,
         "install",
@@ -30,8 +34,8 @@ def main():
         "conda-forge",
         "-y",
     ]
-    print(" ".join(args))
+    print_command(args)
     ret = subprocess.run(args)
-    assert (
-        ret.returncode == 0
-    ), f"Conda install failed with return code {ret.returncode}"
+    assert ret.returncode == 0, (
+        f"Conda install failed with return code {ret.returncode}"
+    )
