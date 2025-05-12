@@ -1495,6 +1495,7 @@ def main():
     workflow_per_sample_parser.add_argument(
         "-m", "--min_size", type=int, default=8, help="Minimum cluster size"
     )
+    workflow_per_sample_parser.add_argument("-a", "--alpha", type=float, default=2.0)
     workflow_per_sample_parser.add_argument(
         "-l",
         "--relabel_prefix",
@@ -1596,6 +1597,7 @@ def main():
             args.input_fastq,
             args.output_path,
             min_size=args.min_size,
+            alpha=args.alpha,
             prefix=args.relabel_prefix,
             num_threads=args.num_threads,
             search=args.search,
