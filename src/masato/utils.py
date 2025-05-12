@@ -37,7 +37,6 @@ def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
         for pattern in [PATTERN_ILLUMINA, PATTERN_CUSTOM]:
             match = pattern.search(os.path.basename(file_))
             if match:
-                print(match.groups())
                 sample_name, read_type = match.groups()[:2]
                 read_type = {"1": "R1", "2": "R2"}.get(read_type, read_type)
                 if read_type not in ["R1", "R2"]:
@@ -178,9 +177,6 @@ def cat_fastq(
             continue
         if _remove_undet and sample_name == "Undetermined":
             continue
-        # if idx < 4:
-        #     continue
-        # print(sample_name)
         with smart_open(r1_path) as r1_file, smart_open(r2_path) as r2_file:
             paired_read_iter = zip(
                 zip(*[r1_file] * 4, strict=True),

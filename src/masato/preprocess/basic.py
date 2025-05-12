@@ -5,8 +5,8 @@ from ..trim import get_primer_set
 from ..utils import print_command, cat_fastq
 
 
-def cutadapt_merge_trim_se(
-    fastq_path: str,
+def combine_trim_clip_pe(
+    input_fastq_dir: str,
     output_fastq: str,
     output_fastq_r2: str,
     primer_set: str,
@@ -15,9 +15,16 @@ def cutadapt_merge_trim_se(
     min_length: int = 0,
     min_length_r2: int = 0,
     quality_trimming: bool = False,
-    _r2: bool = False,
+    cores: int = 16,
 ) -> None:
-    output_dir, output_f = os.path.split(output_fastq)
+    """
+    Combine, quality trim, adapter trim, clip, and length-filter paired-end reads.
+
+    1. Combine using custom function.
+    2. (Optional) Quality trim using fastq.
+    3. Trim adapter, clip to maximum length and filter by length using cutadapt.
+    """
+    output_dir, _ = os.path.split(output_fastq)
     os.makedirs(output_dir, exist_ok=True)
     a, A = get_primer_set(primer_set)
     output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
@@ -29,9 +36,9 @@ def cutadapt_merge_trim_se(
         "0.15",
         "-O",
         "16",
-        "-g" if primer_set.endswith("_5") else "-a",
+        "-g",
         a,
-        "-G" if primer_set.endswith("_5") else "-A",
+        "-G",
         A,
         "--pair-filter",
         "any",
@@ -50,7 +57,7 @@ def cutadapt_merge_trim_se(
         "--too-short-paired-output",
         os.path.join(output_dir_cutadapt, "too_short_2.fq.gz"),
         "--cores",
-        "8",
+        str(cores),
         "--interleaved",
         "-",
     ]
@@ -77,7 +84,7 @@ def cutadapt_merge_trim_se(
             "--stdout",
             "--cut_right",
             "--thread",
-            "8",
+            str(cores),
             "--json",
             fastp_json,
             "--html",
@@ -93,7 +100,7 @@ def cutadapt_merge_trim_se(
         cutadapt_trim_proc = _fastp_trim_proc
 
     cat_fastq(
-        fastq_path,
+        input_fastq_dir,
         output_fp_r1=cutadapt_trim_proc.stdin,
         output_fp_r2=cutadapt_trim_proc.stdin,
     )
