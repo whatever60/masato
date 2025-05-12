@@ -16,6 +16,7 @@ def combine_trim_clip_pe(
     min_length_r2: int = 0,
     quality_trimming: bool = False,
     cores: int = 16,
+    _have_sample_name: bool = False,
 ) -> None:
     """
     Combine, quality trim, adapter trim, clip, and length-filter paired-end reads.
@@ -103,6 +104,7 @@ def combine_trim_clip_pe(
         input_fastq_dir,
         output_fp_r1=cutadapt_trim_proc.stdin,
         output_fp_r2=cutadapt_trim_proc.stdin,
+        _have_sample_name=_have_sample_name,
     )
     cutadapt_trim_proc.stdin.close()
     cutadapt_trim_proc.wait()

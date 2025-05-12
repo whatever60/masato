@@ -910,6 +910,7 @@ def workflow_per_sample(
                     _workflow_one_sample,
                     fastq_for_current_sample,
                     min_size,
+                    alpha,
                     prefix,
                     search,
                 )

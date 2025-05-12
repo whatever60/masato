@@ -97,6 +97,7 @@ def isolate_150_preprocess(
         min_length_r2=min_length_r2,
         quality_trimming=quality_trimming,
         cores=cores,
+        _have_sample_name=True,
     )
 
     shutil.rmtree(output_dir_demux)

@@ -705,7 +705,7 @@ wheels = [
 
 [[package]]
 name = "masato"
-version = "1.3.5"
+version = "1.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "anndata" },
