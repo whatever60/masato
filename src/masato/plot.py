@@ -2,6 +2,7 @@
 import argparse
 import os
 import warnings
+from collections import defaultdict
 
 import matplotlib
 import numpy as np
@@ -332,7 +333,7 @@ def _heatmap(
 
 
 def _barplot_with_whisker_strip(
-    dfs: pd.DataFrame,
+    dfs: list[pd.DataFrame],
     names: list[str],
     title: str,
     group_key: str,
@@ -547,7 +548,7 @@ def _get_subplots(
 
 def _rarefying(
     df: pd.DataFrame, ref: list[int], repeat_num: int = 20
-) -> list[pd.DataFrame | list]:
+) -> tuple[pd.DataFrame, list]:
     """Rarefy the dataframe to the reference list or integer.
 
     The input dataframe should be sample x features, with sample name as index.
@@ -569,6 +570,7 @@ def _rarefying(
         delayed(rarefy_array)(df.iloc[idx].to_numpy(), n, repeat_num)
         for idx, n in enumerate(ref)
     )
+    assert isinstance(res, list)
     sample_names_new_orig = [
         (f"{sample_name}_rarefied_{j}", sample_name)
         for idx, sample_name in enumerate(df.index)
@@ -618,6 +620,7 @@ def get_abundance_plot(
     isolate_sample_group_key: str,
     keep_rare: bool = True,
     keep_unknown: bool = False,
+    cmap: str = "rocket_r",
 ) -> list[Figure]:
     names, groups = zip(*[i for i in df_meta.groupby(sample_group_key, sort=False)])
     ratio = [i[rep_group_key].nunique() for i in groups]
@@ -914,7 +917,7 @@ def get_abundance_plot(
                     fig=fig,
                     axs_heatmap=axs,
                     axs_dend=axs_dend,
-                    cmap="rocket_r",
+                    cmap=cmap,
                     linkage_row=linkage_row,
                     linkage_row_legend=taxon2color,
                     vmax=np.log10(vmax) if plot_type == "heatmap_log10" else vmax,
@@ -1043,8 +1046,177 @@ def get_abundance_plot(
                     vmin=0,
                 )
         if fig is None:
-            raise ValueError(f"No figure is created because of invalid plot type {plot_type}.")
+            raise ValueError(
+                f"No figure is created because of invalid plot type {plot_type}."
+            )
         figs.append(fig)
+    return figs
+
+
+def get_alpha_diversity_plot(
+    df_otu_count: pd.DataFrame,
+    df_meta: pd.DataFrame,
+    df_tax: pd.DataFrame,
+    *,
+    rep_group_key: str,
+    sample_group_key: str,
+    tax_levels: list[str],
+    rarefying_repeat: int = 0,
+    rarefying_value: None | int = None,
+    rarefying_key: None | str = None,
+    plot_strip: bool = False,
+    metrics: list[str] | None = None,
+) -> dict[str, dict[str, Figure]]:
+    if metrics is None:
+        metrics = [
+            "shannon",
+            "simpson",
+            "richness",
+            "chao1",
+            "total_counts",
+            "sequencing_depth",
+        ]
+    metric2name = {
+        "shannon": "Shannon entropy",
+        "simpson": "Simpson's index",
+        "richness": "Richness",
+        "chao1": "Chao1 index",
+        "total_counts": "Total counts",
+        "sequencing_depth": "Sequencing depth",
+    }
+    names, groups = zip(*[i for i in df_meta.groupby(sample_group_key, sort=False)])
+    ratio = [i[rep_group_key].nunique() for i in groups]
+
+    if rarefying_repeat > 1:
+        # Rarefying takes place by the following order:
+        # - When rarefying_key is specified:
+        #    - When this key is a string, rarefy to the depth of the sample corresponding to the key.
+        #    - When this key is a int, rarefy to this value.
+        #    - When this key is None, rarefy to `rarefying_value` if it is
+        #        specified, otherwise rarefy to the minimum depth of all samples.
+        # - When rarefying_key isn't specified, treat as if rarefying_key is None
+        #     for all samples.
+        depth = df_otu_count.sum(axis=1)
+        if rarefying_value is None:
+            rarefying_value = int(depth.min()) - 1
+
+        ref = []
+        if rarefying_key is None:
+            rarefying_keys = [np.nan] * len(df_otu_count)
+        else:
+            rarefying_keys = df_meta[rarefying_key].tolist()
+
+        for i in rarefying_keys:
+            if isinstance(i, str):
+                if i not in df_otu_count.index:
+                    raise ValueError(f"Reference sample {i} is not available.")
+                ref.append(depth[i])
+            elif isinstance(i, int):
+                ref.append(i)
+            elif np.isnan(i):
+                ref.append(rarefying_value)
+            else:
+                raise ValueError(
+                    f"Unknown data type for rarefying_key: {i} ({type(i)})"
+                )
+
+        # rarefy
+        df_otu_count_orig = df_otu_count.copy()
+        df_meta_orig = df_meta.copy()
+        df_otu_count, names_orig = _rarefying(df_otu_count, ref, rarefying_repeat)
+        # NOTE:
+        # Must create the dummy dataframe as a column, cannot be empty dataframe
+        # with index, otherwise order of merged dataframe index will be slightly
+        # wrong.
+        df_meta = pd.merge(
+            pd.DataFrame({"original_sample_name": names_orig}),
+            df_meta,
+            left_on="original_sample_name",
+            right_index=True,
+            validate="many_to_one",
+        ).reset_index(names=df_meta.index.name)
+        df_meta.index = df_otu_count.index
+    else:
+        df_otu_count_orig = None
+        df_meta_orig = None
+
+    wspace = 0.15
+    width = df_meta.groupby([sample_group_key, rep_group_key]).ngroups / 3 + 1.5
+    figs = defaultdict(dict)
+    for level in tax_levels:
+        # no need for taxa qc, all taxa count
+        res = _agg_along_axis(df_otu_count, df_tax[level], axis=1)
+        meta_l = pd.merge(
+            df_meta,
+            _calc_alpha_metrics(res),
+            left_index=True,
+            right_index=True,
+        )
+        _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
+        title_prefix = f"{'ZOTU' if level == 'otu' else level.capitalize()}"
+        for column_of_interest in metrics:
+            title = metric2name[column_of_interest]
+            title = f"{title_prefix} {title}"
+            if rarefying_repeat > 1:
+                suptitle = f"{title} rarefied"
+                if rarefying_key is not None:
+                    suptitle += f" to reference"
+                else:
+                    mantissa = f"{rarefying_value:.1e}"
+                    base, exp = mantissa.split("e")
+                    exp = int(exp)
+                    suffix = rf"${base} \times 10^{{{exp}}}$"
+                    suptitle += f" to {suffix}"
+            else:
+                suptitle = title
+            fig, axs = plt.subplots(
+                1, len(groups), sharey="row", width_ratios=ratio, figsize=(width, 3)
+            )
+            if len(groups) == 1:
+                axs = [axs]
+            _barplot_with_whisker_strip(
+                groups,
+                names=names,
+                title=title,
+                group_key=rep_group_key,
+                column_of_interest=column_of_interest,
+                plot_strip=plot_strip,
+                axs=axs,
+                ylog=False,
+            )
+            fig.suptitle(suptitle, fontsize=16, y=1.05)
+            fig.subplots_adjust(wspace=wspace)
+            figs[column_of_interest][level] = fig
+
+    # # plot sequencing depth separately
+    # if df_otu_count_orig is not None:
+    #     df_otu_count = df_otu_count_orig
+    #     df_meta = df_meta_orig
+    # res = df_otu_count  # no need to aggregate
+    # meta_l = pd.merge(
+    #     df_meta,
+    #     _calc_alpha_metrics(res),
+    #     left_index=True,
+    #     right_index=True,
+    # )
+    # _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
+    # fig, axs = plt.subplots(
+    #     1, len(groups), sharey="row", width_ratios=ratio, figsize=(width, 3)
+    # )
+    # if len(groups) == 1:
+    #     axs = [axs]
+    # fig.subplots_adjust(wspace=wspace)
+    # _barplot_with_whisker_strip(
+    #     groups,
+    #     names=names,
+    #     title="Sequencing depth",
+    #     group_key=rep_group_key,
+    #     column_of_interest="sequencing_depth",
+    #     plot_strip=plot_strip,
+    #     axs=axs,
+    #     ylog=True,
+    # )
+    # figs["sequencing_depth"]["otu"] = fig
     return figs
 
 
