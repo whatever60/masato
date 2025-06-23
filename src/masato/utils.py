@@ -116,6 +116,7 @@ def cat_fastq(
     metadata: str | None = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
+    _id_first: bool = False,
 ) -> None:
     """Process FASTQ files in the given directory, renaming reads,and write the output
     to the specified file pointers. Output fastq will be interleaved if `output_fp_r2`
@@ -163,14 +164,28 @@ def cat_fastq(
         def write_line(line1, line2: str):
             output_fp_r1.write(line1)
             output_fp_r2.write(line2)
+    elif isinstance(output_fp_r1, str) and isinstance(output_fp_r2, str):
+        # If output_fp_r1 and output_fp_r2 are file paths, open them as text files
+        output_fp_r1 = smart_open(output_fp_r1, mode="w")
+        output_fp_r2 = smart_open(output_fp_r2, mode="w")
+
+        def write_line(line1, line2: str):
+            output_fp_r1.write(line1)
+            output_fp_r2.write(line2)
 
     else:
         raise ValueError("Output file pointers must be both gzip or both text file.")
 
-    if _have_sample_name:
+    if _have_sample_name and (not _id_first):
         rename_read = _rename_read_concat
-    else:
+    elif _have_sample_name and _id_first:
+        rename_read = _rename_read_concat_id
+    elif (not _have_sample_name) and (not _id_first):
         rename_read = _rename_read_illumina
+    elif (not _have_sample_name) and _id_first:
+        rename_read = _rename_read_illumina_id
+    else:
+        raise NotImplementedError()
 
     for idx, (r1_path, r2_path, sample_name) in enumerate(tqdm(matched_pairs)):
         if samples_in_meta is not None and sample_name not in samples_in_meta:
@@ -295,14 +310,38 @@ def _rename_read_illumina(
     return f"@sample={sample_name} {read_number} {read_index} {original_header}\n"
 
 
+def _rename_read_illumina_id(
+    header_line: str, sample_name: str, read_number: int, read_index: int
+) -> str:
+    # Remove '@' and split by space, take first part
+    original_header = header_line.strip().split()[0][1:]
+    return f"@{original_header} sample={sample_name} {read_number} {read_index}\n"
+
+
 def _rename_read_concat(
     header_line: str, sample_name: str, read_number: int, read_index: int
 ) -> str:
-    header_line = header_line[1:]
-    original_header, comment = header_line.split(maxsplit=1)
-    original_sample = original_header.split("=", 1)[1]
+    header_line = header_line[1:].strip()
+    sample, comment = header_line.split(maxsplit=1)
+    original_sample = sample.split("=", 1)[1]
     new_sample = f"{original_sample}_{sample_name}"
-    return f"@sample={new_sample} {comment}"
+    read_number_str, read_index_str, original_header = comment.split(" ")
+    return (
+        f"@sample={new_sample} {read_number_str} {read_index_str} {original_header}\n"
+    )
+
+
+def _rename_read_concat_id(
+    header_line: str, sample_name: str, read_number: int, read_index: int
+) -> str:
+    header_line = header_line[1:]
+    sample, comment = header_line.split(maxsplit=1)
+    original_sample = sample.split("=", 1)[1]
+    new_sample = f"{original_sample}_{sample_name}"
+    read_number_str, read_index_str, original_header = comment.split(" ")
+    return (
+        f"@{original_header} sample={new_sample} {read_number_str} {read_index_str}\n"
+    )
 
 
 def print_command(command: str | list[str]) -> None:

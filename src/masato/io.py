@@ -108,7 +108,7 @@ def read_table(
             index_col=index_col,
             comment=comment,
             dtype={index_col: str},
-        ).astype(dtype)
+        )
         if index_name is not None:
             df.index.name = index_name
 
@@ -128,7 +128,7 @@ def read_table(
             #     f"Flat file {table_path} has no metadata, creating biom.Table from matrix only."
             # )
             return biom.Table(
-                df.values,
+                df.values.astype(dtype),
                 observation_ids=df.index.tolist(),
                 sample_ids=df.columns.tolist(),
                 table_id=df.index.name,

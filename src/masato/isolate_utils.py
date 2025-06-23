@@ -17,7 +17,7 @@ def _read_isolate_metadata(isolate_metadata_dir: str) -> pd.DataFrame:
         os.path.join(isolate_metadata_dir, "Destination * - * *.csv")
     ):
         dest_plate_barcode = os.path.basename(path).split(" ")[1]
-        df = pd.read_csv(path, skiprows=2)
+        df = pd.read_csv(path, skiprows=2).drop_duplicates()
         df.iloc[:, 1] = df.iloc[:, 1].map(lambda x: x.split("_")[0])
         df["dest_plate"] = dest_plate_barcode
         isolate_metadata_list.append(df)

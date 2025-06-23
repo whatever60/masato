@@ -445,18 +445,18 @@ def get_primer_set(name: str) -> tuple[str, str | None] | dict[str, str] | str:
             f"^{PRIMER_16S_7};required...{get_rc(PRIMER_16S_5)};optional",
         )
     elif name == "16s_strange":
-        primer_5 = f"ACTGACCTN{PRIMER_16S_5}"
-        primer_7 = f"GTCATTGANCC{PRIMER_16S_7}"
+        primer_5 = f"{PRIMER_16S_5}"
+        primer_7 = f"{PRIMER_16S_7}"
         return (
-            f"^{primer_5};required...{get_rc(primer_5)};optional",
-            f"^{primer_7};required...{get_rc(primer_7)};optional",
+            f"{primer_5};required...{get_rc(primer_5)};optional",
+            f"{primer_7};required...{get_rc(primer_7)};optional",
         )
     elif name == "its_strange":
-        primer_5 = f"GTACCAGANN{PRIMER_ITS_5}"
-        primer_7 = f"GATGACGGNNNCC{PRIMER_ITS_7}"
+        primer_5 = f"{PRIMER_ITS_5}"
+        primer_7 = f"{PRIMER_ITS_7}"
         return (
-            f"^{primer_5};required...{get_rc(primer_5)};optional",
-            f"^{primer_7};required...{get_rc(primer_7)};optional",
+            f"{primer_5};required...{get_rc(primer_5)};optional",
+            f"{primer_7};required...{get_rc(primer_7)};optional",
         )
     elif name == "its_3":
         return get_rc(PRIMER_ITS_7), get_rc(PRIMER_ITS_5)
