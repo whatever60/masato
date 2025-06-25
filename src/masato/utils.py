@@ -20,18 +20,41 @@ PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_(?:L\d{3}_)?(R[12])_001.f(ast)?q(.gz
 PATTERN_CUSTOM = re.compile(r"^(.+?)(?:(?:_|\.)(R?[12]))?.f(?:ast)?q(?:.gz)?$")
 
 
-def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
-    # Dictionary to store file pairs
-    file_pairs = {}
+def find_paired_end_files(fastq_input: str | list[str]) -> list[tuple[str, str, str]]:
+    """Identify matched paired-end FASTQ files based on filename patterns.
 
-    # Find all .fastq.gz and .fq.gz files in the directory
-    fastq_files = (
-        glob.glob(os.path.join(directory, "*.fastq.gz"))
-        + glob.glob(os.path.join(directory, "*.fq.gz"))
-        + glob.glob(os.path.join(directory, "*.fastq"))
-        + glob.glob(os.path.join(directory, "*.fq"))
-    )
+    Supports input as a directory path, a glob pattern (e.g., 'data/*.fastq.gz'),
+    or a list of FASTQ file paths. Matches standard Illumina naming conventions
+    and custom formats like sample_R1.fq.gz, sample.2.fastq, etc.
 
+    Args:
+        fastq_input (str | list[str]): A path to a directory, a glob pattern string,
+            or a list of FASTQ file paths.
+
+    Returns:
+        list[tuple[str, str, str]]: A list of (R1_path, R2_path, sample_name) tuples,
+            sorted by sample name.
+
+    Raises:
+        ValueError: If no FASTQ files are found or if no paired-end files can be matched.
+    """
+    if isinstance(fastq_input, str):
+        if os.path.isdir(fastq_input):
+            fastq_files = (
+                glob.glob(os.path.join(fastq_input, "*.fastq.gz"))
+                + glob.glob(os.path.join(fastq_input, "*.fq.gz"))
+                + glob.glob(os.path.join(fastq_input, "*.fastq"))
+                + glob.glob(os.path.join(fastq_input, "*.fq"))
+            )
+        else:
+            fastq_files = glob.glob(fastq_input)
+    else:
+        fastq_files = fastq_input
+    
+    if not fastq_files:
+        raise ValueError("No FASTQ files found in the specified input.")
+
+    file_pairs: dict[tuple[str, str], str] = {}
     # Process each file using pattern functions
     for file_ in fastq_files:
         for pattern in [PATTERN_ILLUMINA, PATTERN_CUSTOM]:
@@ -73,6 +96,9 @@ def find_paired_end_files(directory: str) -> list[tuple[str, str, str]]:
             matched_pairs.append((r1_file, r2_file, sample_name))
         else:
             warnings.warn(f"Missing pair for file: {file_}")
+
+    if not matched_pairs:
+        raise ValueError("No paired-end FASTQ file pairs were found.")
 
     # Report the number of matched pairs
     print(f"Number of matched pairs: {len(matched_pairs)}")
@@ -116,7 +142,6 @@ def cat_fastq(
     metadata: str | None = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
-    _id_first: bool = False,
 ) -> None:
     """Process FASTQ files in the given directory, renaming reads,and write the output
     to the specified file pointers. Output fastq will be interleaved if `output_fp_r2`
@@ -176,16 +201,10 @@ def cat_fastq(
     else:
         raise ValueError("Output file pointers must be both gzip or both text file.")
 
-    if _have_sample_name and (not _id_first):
+    if _have_sample_name:
         rename_read = _rename_read_concat
-    elif _have_sample_name and _id_first:
-        rename_read = _rename_read_concat_id
-    elif (not _have_sample_name) and (not _id_first):
-        rename_read = _rename_read_illumina
-    elif (not _have_sample_name) and _id_first:
-        rename_read = _rename_read_illumina_id
     else:
-        raise NotImplementedError()
+        rename_read = _rename_read_illumina
 
     for idx, (r1_path, r2_path, sample_name) in enumerate(tqdm(matched_pairs)):
         if samples_in_meta is not None and sample_name not in samples_in_meta:
@@ -306,42 +325,18 @@ def _rename_read_illumina(
         Renamed header line.
     """
     # Remove '@' and split by space, take first part
-    original_header = header_line.strip().split()[0][1:]
-    return f"@sample={sample_name} {read_number} {read_index} {original_header}\n"
-
-
-def _rename_read_illumina_id(
-    header_line: str, sample_name: str, read_number: int, read_index: int
-) -> str:
-    # Remove '@' and split by space, take first part
-    original_header = header_line.strip().split()[0][1:]
-    return f"@{original_header} sample={sample_name} {read_number} {read_index}\n"
+    original_header = header_line[1:].strip()
+    return f"@{original_header} {read_index} ;sample={sample_name}\n"
 
 
 def _rename_read_concat(
     header_line: str, sample_name: str, read_number: int, read_index: int
 ) -> str:
-    header_line = header_line[1:].strip()
-    sample, comment = header_line.split(maxsplit=1)
-    original_sample = sample.split("=", 1)[1]
-    new_sample = f"{original_sample}_{sample_name}"
-    read_number_str, read_index_str, original_header = comment.split(" ")
-    return (
-        f"@sample={new_sample} {read_number_str} {read_index_str} {original_header}\n"
+    original_header = header_line[1:].strip()
+    assert original_header.split()[-1].startswith(";sample="), (
+        "Header line must end with ';sample='"
     )
-
-
-def _rename_read_concat_id(
-    header_line: str, sample_name: str, read_number: int, read_index: int
-) -> str:
-    header_line = header_line[1:]
-    sample, comment = header_line.split(maxsplit=1)
-    original_sample = sample.split("=", 1)[1]
-    new_sample = f"{original_sample}_{sample_name}"
-    read_number_str, read_index_str, original_header = comment.split(" ")
-    return (
-        f"@{original_header} sample={new_sample} {read_number_str} {read_index_str}\n"
-    )
+    return f"@{original_header}_{sample_name}\n"
 
 
 def print_command(command: str | list[str]) -> None:
