@@ -56,6 +56,15 @@ wheels = [
 ]
 
 [[package]]
+name = "attrs"
+version = "25.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/b0/1367933a8532ee6ff8d63537de4f1177af4bff9f3e829baf7331f595bb24/attrs-25.3.0.tar.gz", hash = "sha256:75d7cefc7fb576747b2c81b4442d4d4a1ce0900973527c011d1030fd3bf4af1b", size = 812032 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/77/06/bb80f5f86020c4551da315d78b3ab75e8228f89f0162f2c3a819e407941a/attrs-25.3.0-py3-none-any.whl", hash = "sha256:427318ce031701fea540783410126f03899a97ffc6f61596ad581ac2e40e3bc3", size = 63815 },
+]
+
+[[package]]
 name = "biom-format"
 version = "2.1.16"
 source = { registry = "https://pypi.org/simple" }
@@ -331,6 +340,22 @@ wheels = [
 ]
 
 [[package]]
+name = "cyclopts"
+version = "3.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "docstring-parser", marker = "python_full_version < '4.0'" },
+    { name = "rich" },
+    { name = "rich-rst" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/25/d8/b9592e5bb84500be07d2080ccc7d1806850cec588b68628c1fb92cc9076d/cyclopts-3.20.0.tar.gz", hash = "sha256:999aac0e3480c521d2424bf928b3a7e1288c4b3007b0e004550cd4dbb6331b06", size = 73915 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/1e/8c463d09961430fafd25d35862939107044453042161c788ae255b7c6f87/cyclopts-3.20.0-py3-none-any.whl", hash = "sha256:585c7dbce09d5e3cc2601f4beed31de590e7c219e235328055c0aa283382fc72", size = 83850 },
+]
+
+[[package]]
 name = "debugpy"
 version = "1.8.5"
 source = { registry = "https://pypi.org/simple" }
@@ -370,6 +395,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/42/4b/6b300d145575ac7445e3b79b5c0c3a4ea441937278528b8dbd5b0aab42fc/DendroPy-5.0.1.tar.gz", hash = "sha256:f2815e7649a6fe2924ff3fdf00a660c948dc6f3316e303b8b022f74cc75ca42e", size = 395057 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/16/96/7dcfffa89fc659669e697bcbdf01e7eac37ab0676aa242323a23366132a2/DendroPy-5.0.1-py3-none-any.whl", hash = "sha256:20066d300e65517119f885baf1061717bbb68cbb5190e611f3ff8b558e20cbc6", size = 459524 },
+]
+
+[[package]]
+name = "docstring-parser"
+version = "0.16"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/12/9c22a58c0b1e29271051222d8906257616da84135af9ed167c9e28f85cb3/docstring_parser-0.16.tar.gz", hash = "sha256:538beabd0af1e2db0146b6bd3caa526c35a34d61af9fd2887f3a8a27a739aa6e", size = 26565 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/7c/e9fcff7623954d86bdc17782036cbf715ecab1bec4847c008557affe1ca8/docstring_parser-0.16-py3-none-any.whl", hash = "sha256:bf0a1387354d3691d102edef7ec124f219ef639982d096e26e3b60aeffa90637", size = 36533 },
+]
+
+[[package]]
+name = "docutils"
+version = "0.21.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/ed/aefcc8cd0ba62a0560c3c18c33925362d46c6075480bfa4df87b28e169a9/docutils-0.21.2.tar.gz", hash = "sha256:3a6b18732edf182daa3cd12775bbb338cf5691468f91eeeb109deff6ebfa986f", size = 2204444 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/d7/9322c609343d929e75e7e5e6255e614fcc67572cfd083959cdef3b7aad79/docutils-0.21.2-py3-none-any.whl", hash = "sha256:dafca5b9e384f0e419294eb4d2ff9fa826435bf15f15b7bd45723e8ad76811b2", size = 587408 },
 ]
 
 [[package]]
@@ -705,12 +748,13 @@ wheels = [
 
 [[package]]
 name = "masato"
-version = "1.4.2"
+version = "1.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "anndata" },
     { name = "biom-format" },
     { name = "biopython" },
+    { name = "cyclopts" },
     { name = "dendropy" },
     { name = "ipykernel" },
     { name = "ipython" },
@@ -737,6 +781,7 @@ requires-dist = [
     { name = "anndata", specifier = ">=0.11.4" },
     { name = "biom-format", specifier = ">=2.1.16" },
     { name = "biopython", specifier = ">=1.84" },
+    { name = "cyclopts", specifier = ">=3.20" },
     { name = "dendropy", specifier = ">=5.0.1" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "ipython", specifier = ">=8.27.0" },
@@ -1478,6 +1523,19 @@ wheels = [
 ]
 
 [[package]]
+name = "rich-rst"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "docutils" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b0/69/5514c3a87b5f10f09a34bb011bc0927bc12c596c8dae5915604e71abc386/rich_rst-1.3.1.tar.gz", hash = "sha256:fad46e3ba42785ea8c1785e2ceaa56e0ffa32dbe5410dec432f37e4107c4f383", size = 13839 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/bc/cc4e3dbc5e7992398dcb7a8eda0cbcf4fb792a0cdb93f857b478bf3cf884/rich_rst-1.3.1-py3-none-any.whl", hash = "sha256:498a74e3896507ab04492d326e794c3ef76e7cda078703aa592d1853d91098c1", size = 11621 },
+]
+
+[[package]]
 name = "scikit-bio"
 version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1724,7 +1782,7 @@ wheels = [
 
 [[package]]
 name = "typer"
-version = "0.15.3"
+version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1732,9 +1790,9 @@ dependencies = [
     { name = "shellingham" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/1a/5f36851f439884bcfe8539f6a20ff7516e7b60f319bbaf69a90dc35cc2eb/typer-0.15.3.tar.gz", hash = "sha256:818873625d0569653438316567861899f7e9972f2e6e0c16dab608345ced713c", size = 101641 }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/8c/7d682431efca5fd290017663ea4588bf6f2c6aad085c7f108c5dbc316e70/typer-0.16.0.tar.gz", hash = "sha256:af377ffaee1dbe37ae9440cb4e8f11686ea5ce4e9bae01b84ae7c63b87f1dd3b", size = 102625 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/48/20/9d953de6f4367163d23ec823200eb3ecb0050a2609691e512c8b95827a9b/typer-0.15.3-py3-none-any.whl", hash = "sha256:c86a65ad77ca531f03de08d1b9cb67cd09ad02ddddf4b34745b5008f43b239bd", size = 45253 },
+    { url = "https://files.pythonhosted.org/packages/76/42/3efaf858001d2c2913de7f354563e3a3a2f0decae3efe98427125a8f441e/typer-0.16.0-py3-none-any.whl", hash = "sha256:1f79bed11d4d02d4310e3c1b7ba594183bcedb0ac73b27a9e5f28f6fb5b98855", size = 46317 },
 ]
 
 [[package]]

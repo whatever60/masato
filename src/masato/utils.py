@@ -1,15 +1,17 @@
+from calendar import c
 import io
 import glob
 import gzip
+import sys
 import os
 import re
 import warnings
-from typing import IO
+from typing import IO, BinaryIO, TextIO, Callable
 
 import pandas as pd
 from tqdm.auto import tqdm
 
-from .io import read_table, write_table
+from .io import read_table, write_table  # used by other modules.
 
 
 PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_(?:L\d{3}_)?(R[12])_001.f(ast)?q(.gz)?$")
@@ -50,7 +52,7 @@ def find_paired_end_files(fastq_input: str | list[str]) -> list[tuple[str, str, 
             fastq_files = glob.glob(fastq_input)
     else:
         fastq_files = fastq_input
-    
+
     if not fastq_files:
         raise ValueError("No FASTQ files found in the specified input.")
 
@@ -108,7 +110,7 @@ def find_paired_end_files(fastq_input: str | list[str]) -> list[tuple[str, str, 
     return matched_pairs
 
 
-def smart_open(file_path: str, mode: str = "r") -> IO[str] | gzip.GzipFile:
+def smart_open(file_path: str, mode: str = "r") -> io.TextIOWrapper | gzip.GzipFile:
     """Open a file as text or as a gzip file based on its magic number.
 
     Args:
@@ -116,7 +118,7 @@ def smart_open(file_path: str, mode: str = "r") -> IO[str] | gzip.GzipFile:
         mode (str): Mode in which the file should be opened. Defaults to 'rt' (read text).
 
     Returns:
-        IO[str] | gzip.GzipFile: A file object or a gzip file object.
+        IO[str] | IO[byte]: A file object or a gzip file object.
     """
 
     if mode == "r":
@@ -135,99 +137,129 @@ def smart_open(file_path: str, mode: str = "r") -> IO[str] | gzip.GzipFile:
         raise ValueError(f"Mode must be 'r' or 'w' if specified, getting {mode}.")
 
 
+OutputHandle = str | None | TextIO | BinaryIO
+
+
+def resolve_output(fp: OutputHandle) -> IO[str] | IO[bytes]:
+    if fp is None or fp == "-":
+        return sys.stdout
+    elif isinstance(fp, (io.TextIOBase, io.StringIO, io.BufferedIOBase, io.BytesIO)):
+        return fp
+    elif isinstance(fp, str):
+        return smart_open(fp, mode="w")
+    else:
+        raise ValueError(f"Unsupported output type: {type(fp)}")
+
+
+def _make_writer(handle: IO[str] | IO[bytes]) -> Callable[[str], None]:
+    """
+    Create a string-writing function based on the stream type.
+
+    This function returns a writer that takes a string and writes it to the given handle.
+    If the handle is a text stream (`io.TextIOBase`), the string is written directly.
+    If the handle is a binary stream (`io.BufferedIOBase`), the string is encoded to UTF-8
+    bytes before writing.
+
+    Common use cases:
+        - `sys.stdout`: Usually `TextIOBase`; safe to write strings directly.
+        - `sys.stdout.buffer`: `BufferedIOBase`; requires encoding.
+        - `open("file.txt", "w")`: Returns a `TextIOWrapper` (text mode).
+        - `open("file.txt", "wb")`: Returns a `BufferedWriter` (binary mode).
+        - `subprocess.Popen(..., stdin=PIPE, text=True)`: `proc.stdin` is `TextIOBase`.
+        - `subprocess.Popen(..., stdin=PIPE, text=False)`: `proc.stdin` is `BufferedIOBase`.
+        - `io.StringIO()`: `TextIOBase`, accepts strings.
+        - `io.BytesIO()`: `BufferedIOBase`, accepts bytes.
+
+    Args:
+        handle: A file-like object for writing, either in text mode (`IO[str]`) or binary mode (`IO[bytes]`).
+
+    Returns:
+        A function that takes a string and writes it to the handle appropriately.
+
+    Raises:
+        ValueError: If the stream type is not recognized as either text or binary.
+    """
+
+    if isinstance(handle, io.TextIOBase):
+
+        def func(s: str) -> None:
+            handle.write(s)
+    elif isinstance(handle, io.BufferedIOBase):
+
+        def func(s: str) -> None:
+            handle.write(s.encode())
+    else:
+        raise ValueError("Unsupported stream type")
+    return func
+
+
 def cat_fastq(
-    directory: str,
-    output_fp_r1,
-    output_fp_r2=None,
+    directory: str | list[str],
+    output_fp_r1: OutputHandle,
+    output_fp_r2: OutputHandle = None,
     metadata: str | None = None,
     _remove_undet: bool = True,
     _have_sample_name: bool = False,
 ) -> None:
-    """Process FASTQ files in the given directory, renaming reads,and write the output
-    to the specified file pointers. Output fastq will be interleaved if `output_fp_r2`
-    is None.
-
-    This function reinvents the wheel implemented in many bioinformatics tools, but I
-    am still doing this for customizing the read renaming.
+    """
+    Concatenate paired-end FASTQ files from a directory into one or two output streams,
+    renaming reads along the way. Supports output to files, subprocess pipes, stdout,
+    or interleaved output depending on destination identity.
 
     Args:
-        directory: Directory containing FASTQ files.
-        output_fp_r1: File pointer to write the R1 output.
-        output_fp_r2: File pointer to write the R2 output.
+        directory: Directory containing FASTQ files to process.
+        output_fp_r1: Destination for R1 reads. Can be a file path, a writable file-like
+            object (text or binary), subprocess pipe (`proc.stdin`), or "-" / None for stdout.
+        output_fp_r2: Destination for R2 reads. Same options as `output_fp_r1`. If None,
+            it defaults to stdout. If both outputs are the same object, interleaved output
+            is written.
+        metadata: Optional path to a sample metadata file. If provided, only samples listed
+            in this file (1st column as index) are processed.
+        _remove_undet: Whether to skip samples named "Undetermined".
+        _have_sample_name: If True, include sample name in renamed read ID. Otherwise use
+            standard Illumina-style renaming.
+
+    Raises:
+        ValueError: If output types are unsupported.
     """
-    matched_pairs = find_paired_end_files(directory)
-    if output_fp_r2 is None:
-        output_fp_r2 = output_fp_r1
     if metadata is not None:
         samples_in_meta = pd.read_table(metadata, index_col=0).index.to_list()
     else:
         samples_in_meta = None
 
-    if (
-        (
-            isinstance(output_fp_r1, gzip.GzipFile)
-            and isinstance(output_fp_r2, gzip.GzipFile)
-        )
-        or (
-            isinstance(output_fp_r1, io.BufferedWriter)
-            and isinstance(output_fp_r2, io.BufferedWriter)
-        )
-        or (
-            isinstance(output_fp_r1, io.BytesIO)
-            and isinstance(output_fp_r2, io.BytesIO)
-        )
+    out_r1 = resolve_output(output_fp_r1)
+    out_r2 = resolve_output(output_fp_r2)
+
+    write_r1 = _make_writer(out_r1)
+    write_r2 = _make_writer(out_r2)
+
+    rename_read = _rename_read_concat if _have_sample_name else _rename_read_illumina
+
+    for idx, (r1_path, r2_path, sample_name) in enumerate(
+        tqdm(find_paired_end_files(directory))
     ):
-
-        def write_line(line1, line2: str):
-            output_fp_r1.write(line1.encode())
-            output_fp_r2.write(line2.encode())
-
-    elif isinstance(output_fp_r1, io.TextIOBase) and isinstance(
-        output_fp_r2, io.TextIOBase
-    ):
-
-        def write_line(line1, line2: str):
-            output_fp_r1.write(line1)
-            output_fp_r2.write(line2)
-    elif isinstance(output_fp_r1, str) and isinstance(output_fp_r2, str):
-        # If output_fp_r1 and output_fp_r2 are file paths, open them as text files
-        output_fp_r1 = smart_open(output_fp_r1, mode="w")
-        output_fp_r2 = smart_open(output_fp_r2, mode="w")
-
-        def write_line(line1, line2: str):
-            output_fp_r1.write(line1)
-            output_fp_r2.write(line2)
-
-    else:
-        raise ValueError("Output file pointers must be both gzip or both text file.")
-
-    if _have_sample_name:
-        rename_read = _rename_read_concat
-    else:
-        rename_read = _rename_read_illumina
-
-    for idx, (r1_path, r2_path, sample_name) in enumerate(tqdm(matched_pairs)):
         if samples_in_meta is not None and sample_name not in samples_in_meta:
             continue
         if _remove_undet and sample_name == "Undetermined":
             continue
+
         with smart_open(r1_path) as r1_file, smart_open(r2_path) as r2_file:
             paired_read_iter = zip(
                 zip(*[r1_file] * 4, strict=True),
                 zip(*[r2_file] * 4, strict=True),
                 strict=True,
             )
-
             for read_index, (r1_lines, r2_lines) in enumerate(
                 paired_read_iter, start=1
             ):
-                # Renaming reads
-                write_line(
-                    rename_read(r1_lines[0], sample_name, 1, read_index)
-                    + "".join(r1_lines[1:]),
-                    rename_read(r2_lines[0], sample_name, 2, read_index)
-                    + "".join(r2_lines[1:]),
-                )
+                r1_block = rename_read(
+                    r1_lines[0], sample_name, 1, read_index
+                ) + "".join(r1_lines[1:])
+                r2_block = rename_read(
+                    r2_lines[0], sample_name, 2, read_index
+                ) + "".join(r2_lines[1:])
+                write_r1(r1_block)
+                write_r2(r2_block)
 
 
 def cat_fastq_se(
