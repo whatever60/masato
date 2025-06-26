@@ -9,7 +9,7 @@ from ..trim import TRUSEQ_READ1, TRUSEQ_READ2, get_rc
 from ..utils import print_command, find_paired_end_files
 
 
-def rngtagseq_150_preprocess(
+def rnatagseq_150_preprocess(
     input_: str | list[str],
     barcode_fasta: str,
     output_dir: str,
@@ -19,6 +19,7 @@ def rngtagseq_150_preprocess(
 
     for r1_path, r2_path, sample_name in tqdm(find_paired_end_files(input_)):
         output_dir_sample = os.path.join(output_dir, sample_name)
+        os.makedirs(output_dir_sample, exist_ok=True)
         output_r1 = os.path.join(output_dir_sample, "merged_1.fq.gz")
         output_r2 = os.path.join(output_dir_sample, "merged_2.fq.gz")
         fastp_json = os.path.join(output_dir_sample, "fastp.json")
@@ -66,6 +67,7 @@ def rngtagseq_150_preprocess(
                 # write name
                 seq = f"^{record.seq};e=1...r1={get_rc(TRUSEQ_READ1)};{truseq_adapter_config};optional"
                 barcode_file.write(f">{record.id}\n{seq}\n")
+            barcode_file.flush()
             cutadapt_args = [
                 "cutadapt",
                 "-a",
@@ -87,15 +89,16 @@ def rngtagseq_150_preprocess(
             print_command(trim_args)
             trim_proc = subprocess.Popen(
                 trim_args,
-                stdin=subprocess.PIPE,
+                # stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
             )
             print_command(cutadapt_args)
+            import pdb; pdb.set_trace()
             cutadapt_proc = subprocess.Popen(
                 cutadapt_args,
                 stdin=trim_proc.stdout,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             trim_proc.wait()

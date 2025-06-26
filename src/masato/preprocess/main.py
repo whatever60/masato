@@ -2,7 +2,7 @@ import typer
 
 from .basic import combine_trim_clip_pe as _combine_trim_clip_pe
 from .camii_isolates import isolate_150_preprocess as _isolate_150_preprocess
-from .rnatag_seq import rngtagseq_150_preprocess
+from .rnatag_seq import rnatagseq_150_preprocess as _rnatagseq_150_preprocess
 from ..trim import resolve_input_path
 
 
@@ -54,12 +54,24 @@ def combine_trim_clip_pe(
 
 @app.command()
 def isolate_150_preprocess(
-    fastq_dir: str = typer.Option(..., "-i", "--input-dir", help="Input FASTQ directory"),
-    barcode_fwd_fasta: str = typer.Option(..., "-fb", "--barcode-fwd", help="Forward barcode FASTA"),
-    barcode_rev_fasta: str = typer.Option(..., "-rb", "--barcode-rev", help="Reverse barcode FASTA"),
-    rename_pattern: str = typer.Option(..., "-pt", "--rename-pattern", help="Renaming pattern for output reads"),
-    output_fastq: str = typer.Option(..., "-o1", "--output1", help="Output FASTQ for read 1"),
-    output_fastq_r2: str = typer.Option(..., "-o2", "--output2", help="Output FASTQ for read 2"),
+    fastq_dir: str = typer.Option(
+        ..., "-i", "--input-dir", help="Input FASTQ directory"
+    ),
+    barcode_fwd_fasta: str = typer.Option(
+        ..., "-fb", "--barcode-fwd", help="Forward barcode FASTA"
+    ),
+    barcode_rev_fasta: str = typer.Option(
+        ..., "-rb", "--barcode-rev", help="Reverse barcode FASTA"
+    ),
+    rename_pattern: str = typer.Option(
+        ..., "-pt", "--rename-pattern", help="Renaming pattern for output reads"
+    ),
+    output_fastq: str = typer.Option(
+        ..., "-o1", "--output1", help="Output FASTQ for read 1"
+    ),
+    output_fastq_r2: str = typer.Option(
+        ..., "-o2", "--output2", help="Output FASTQ for read 2"
+    ),
     # args for combine_trim_clip_pe
     primer_set: str = typer.Option(..., help="Primer set name"),
     first_k: int | None = typer.Option(
@@ -102,32 +114,34 @@ def isolate_150_preprocess(
 
 @app.command()
 def rnatagseq_150_preprocess(
-    fastq_dir: str = typer.Option(..., "-i", "--input-dir", help="Input FASTQ directory"),
-    barcode_fasta: str = typer.Option(..., "-b", "--barcode-fasta", help="Barcode FASTA file"),
-    rename_pattern: str = typer.Option(..., "-pt", "--rename-pattern", help="Renaming pattern for output reads"),
-    output_fastq: str = typer.Option(..., "-o1", "--output1", help="Output FASTQ for read 1"),
-    output_fastq_r2: str = typer.Option(..., "-o2", "--output2", help="Output FASTQ for read 2"),
-    cores: int = typer.Option(16, help="Number of cores to use"),
+    input_: list[str] = typer.Option(
+        ..., "-i", "--input", help="Input directory, glob, or list of FASTQ files."
+    ),
+    barcode_fasta: str = typer.Option(
+        ..., "-b", "--barcode-fasta", help="Barcode FASTA file for demultiplexing"
+    ),
+    output_dir: str = typer.Option(
+        ..., "-o", "--output-dir", help="Directory to store processed outputs"
+    ),
+    cores: int = typer.Option(16, help="Number of CPU threads to use"),
 ) -> None:
     """
-    Preprocess RNAtag-Seq 150bp reads by trimming, demultiplexing, and combining into output FASTQ files.
+    Preprocess RNAtag-Seq 150bp reads by trimming, demultiplexing, and writing outputs.
 
     Args:
-        fastq_dir: Path to input FASTQ files.
-        barcode_fasta: Path to barcode FASTA file (used for demultiplexing).
-        rename_pattern: Pattern to rename input files using mmv.
-        output_fastq: Path to write merged R1 FASTQ.
-        output_fastq_r2: Path to write merged R2 FASTQ.
+        input_: Input FASTQ files or directory/glob pattern.
+        barcode_fasta: Path to barcode FASTA file.
+        output_dir: Directory where processed FASTQs will be written.
         cores: Number of threads to use.
     """
     barcode_fasta = resolve_input_path(barcode_fasta)
-    rename_pattern = resolve_input_path(rename_pattern)
-
-    rngtagseq_150_preprocess(
-        fastq_dir=fastq_dir,
+    if len(input_) == 1:
+        input_resolved = input_[0]
+    else:
+        input_resolved = input_
+    _rnatagseq_150_preprocess(
+        input_=input_resolved,
         barcode_fasta=barcode_fasta,
-        rename_pattern=rename_pattern,
-        output_fastq_r1=output_fastq,
-        output_fastq_r2=output_fastq_r2,
+        output_dir=output_dir,
         cores=cores,
     )
