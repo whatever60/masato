@@ -1,163 +1,102 @@
-import glob
 import os
-import shutil
 import subprocess
+import tempfile
 
-from ..trim import rename_files_with_mmv, set_nofile_limit
-from ..utils import print_command, cat_fastq, smart_open
-from .basic import combine_trim_clip_pe
+from Bio import SeqIO
+from tqdm.auto import tqdm
+
+from ..trim import TRUSEQ_READ1, TRUSEQ_READ2, get_rc
+from ..utils import print_command, find_paired_end_files
 
 
 def rngtagseq_150_preprocess(
-    fastq_dir: str,
+    input_: str | list[str],
     barcode_fasta: str,
-    rename_pattern: str,
-    output_fastq_r1: str,
-    output_fastq_r2: str,
+    output_dir: str,
     cores: int = 16,
 ) -> None:
-    output_dir, output_f = os.path.split(output_fastq_r1)
-    output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
-    output_dir_demux = os.path.join(output_dir, "demux")
-    output_dir_demux_fail = os.path.join(output_dir, "demux_failed")
-    os.makedirs(output_dir_cutadapt, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(output_dir_demux, exist_ok=True)
-    os.makedirs(output_dir_demux_fail, exist_ok=True)
 
-    fastp_json = os.path.join(output_dir_cutadapt, "fastp.json")
-    fastp_html = os.path.join(output_dir_cutadapt, "fastp.html")
-    trim_args = [
-        "fastp",
-        "--stdin",
-        "--interleaved_in",
-        "--stdout",
-        "--thread",
-        str(cores),
-        "--cut_tail",
-        "--correction",
-        "--html",
-        fastp_html,
-        "--json",
-        fastp_json,
-    ]
+    for r1_path, r2_path, sample_name in tqdm(find_paired_end_files(input_)):
+        output_dir_sample = os.path.join(output_dir, sample_name)
+        output_r1 = os.path.join(output_dir_sample, "merged_1.fq.gz")
+        output_r2 = os.path.join(output_dir_sample, "merged_2.fq.gz")
+        fastp_json = os.path.join(output_dir_sample, "fastp.json")
+        fastp_html = os.path.join(output_dir_sample, "fastp.html")
 
-    cutadapt_args = [
-        "cutadapt",
-        "-e",
-        "0.15",
-        "-a",
-        "AGATCGGAAGAGCACACGTC;min_overlap=15",
-        "-A",
-        "AGATCGGAAGAGCGTCGTGT;min_overlap=15",
-        "-j",
-        str(cores),
-        "--interleaved",
-        "-",
-    ]
-    demux_args = [
-        "cutadapt",
-        "-e",
-        "1",
-        "-G",
-        f"^file:{barcode_fasta}",
-        "-j",
-        str(cores),
-        "--interleaved",
-        "-o",
-        os.path.join(output_dir_demux, "{name1}-{name2}_R1.fq.gz"),
-        "-p",
-        os.path.join(output_dir_demux, "{name1}-{name2}_R2.fq.gz"),
-        "-",
-    ]
-
-    print_command(trim_args)
-    trim_proc = subprocess.Popen(
-        trim_args,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    print_command(cutadapt_args)
-    cutadapt_proc = subprocess.Popen(
-        cutadapt_args,
-        stdin=trim_proc.stdout,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    print_command(demux_args)
-    demux_proc = subprocess.Popen(
-        demux_args,
-        stdin=cutadapt_proc.stdout,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    cat_fastq(fastq_dir, output_fp_r1=trim_proc.stdin, output_fp_r2=trim_proc.stdin)
-    # ensure all processes are finished
-    trim_proc.stdin.close()
-    trim_proc.wait()
-    # cutadapt_proc.stdin.close()
-    cutadapt_proc.wait()
-    # demux_proc.stdin.close()
-    demux_proc.wait()
-
-    rename_files_with_mmv(output_dir_demux, rename_pattern)
-
-    # move all remaining files (whose name1 or name2 is "unknown") to output_dir/demux_failed
-    subprocess.run(
-        [
-            "mv",
-            os.path.join(output_dir_demux, "unknown-unknown_R1.fq.gz"),
-            os.path.join(output_dir_demux, "unknown-unknown_R2.fq.gz"),
-            os.path.join(output_dir, "demux_failed"),
+        trim_args = [
+            "fastp",
+            "--in1",
+            r1_path,
+            "--in2",
+            r2_path,
+            "--stdout",
+            "--thread",
+            str(cores),
+            "--cut_tail",
+            "--correction",
+            "--disable_length_filtering", # default is 15 and will filter out 8bp read2. 
+            "--html",
+            fastp_html,
+            "--json",
+            fastp_json,
         ]
-    )
 
-    awk_code = r"""{
-    if (NR % 4 == 1) {
-        split($0, parts, " ")
-        sub(/^@/, "", parts[1])
-        suffix = substr(parts[1], 8)  # skip first 7 characters
-        new_id = parts[4] "_" suffix
-        print "@" new_id
-    } else {
-        print
-    }
-}"""
-    awk_args = ["awk", awk_code]
-    print_command(awk_args)
-    awk1_proc = subprocess.Popen(
-        awk_args,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        # stderr=subprocess.DEVNULL,
-    )
-    seqkit1_args = ["seqkit", "seq", "-o", output_fastq_r1]
-    print_command(seqkit1_args)
-    seqkit1_proc = subprocess.Popen(
-        seqkit1_args,
-        stdin=awk1_proc.stdout,
-        stdout=subprocess.DEVNULL,
-        # stderr=subprocess.DEVNULL,
-    )
-    print_command(awk_args)
-    awk2_proc = subprocess.Popen(
-        awk_args,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    seqkit2_args = ["seqkit", "seq", "-o", output_fastq_r2]
-    print_command(seqkit2_args)
-    seqkit2_proc = subprocess.Popen(
-        seqkit2_args,
-        stdin=awk2_proc.stdout,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    cat_fastq(
-        output_dir_demux,
-        output_fp_r1=awk1_proc.stdin,
-        output_fp_r2=awk2_proc.stdin,
-        _have_sample_name=True,
-    )
+        # NOTE about cutadapt 3' adapter removal and 5' barcode demultiplexing at the same time:
+        # cutadapt only trims each read n times (--times) and the default is 1. So by default,
+        # only 5' OR 3' adapter will be removed, not both. However, cutadapt does go through
+        # all adapters and choose the best match for trimming. So to trim both 5' and 3' adapters,
+        # we can consider the following options:
+        # 1. Use linked adatper. It would require an awkward fasta file. But I am adopting
+        # it here while requesting a new feature at https://github.com/marcelm/cutadapt/issues/851.
+        # 2. Run cutadapt twice. It's easier to remove reads with bad barcodes by discarding untrimmed.
+        # 3. Specify both -A and -G and --times 2. This is only approximately correct.
+
+        # NOTE about cutadapt anchored adapters:
+        # Anchored adapters are required to fully match. So min_overlap is not allowed or
+        # ignored. Therefore, to accommodate sequencing configs where the second read is only
+        # as long as the barcode (i.e., linker is not sequences), we need to allow indels,
+        # i.e., we cannot specify `noindels`, even that will be more rigid and faster.
+
+        # NOTE: Create a temp file from a legit barcode fasta file by doing
+        # f"^<seq>;e=1...r1=<get_rc(truseq_read1)>;min_overlap=5;e=0.15;optional"
+        truseq_adapter_config = "min_overlap=5;e=0.15"
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".fasta") as barcode_file:
+            for record in SeqIO.parse(barcode_fasta, "fasta"):
+                # write name
+                seq = f"^{record.seq};e=1...r1={get_rc(TRUSEQ_READ1)};{truseq_adapter_config};optional"
+                barcode_file.write(f">{record.id}\n{seq}\n")
+            cutadapt_args = [
+                "cutadapt",
+                "-a",
+                f"r2={TRUSEQ_READ2};{truseq_adapter_config}",
+                "-A",
+                f"file:{barcode_file.name}",
+                "--rename",
+                "{id}_{r2.adapter_name} {comment}",
+                "-j",
+                str(cores),
+                "--interleaved",
+                "-o",
+                output_r1,
+                "-p",
+                output_r2,
+                "-",
+            ]
+
+            print_command(trim_args)
+            trim_proc = subprocess.Popen(
+                trim_args,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            print_command(cutadapt_args)
+            cutadapt_proc = subprocess.Popen(
+                cutadapt_args,
+                stdin=trim_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            trim_proc.wait()
+            cutadapt_proc.wait()
