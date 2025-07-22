@@ -1,6 +1,6 @@
 [project]
 name = "masato"
-version = "1.5.1"
+version = "1.5.2"
 description = "Modular Amplicon Sequencing Analysis TOokit"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,7 +47,7 @@ dependencies = [
 "run_rdp_classifier.py" = "masato.run_rdp_classifier:main"
 "preprocess.py" = "masato.preprocess.main:app"
 "masato" = "masato.cli:app"
-"cat-fastq" = "masato.cli:cat_fastq_cli"
+# "cat-fastq" = "masato.cli:cat_fastq_cli"
 # setup scripts
 masato_conda_install = "masato.setup.conda_install:main"
 masato_download_rdp = "masato.setup.download_rdp:main"

@@ -6,7 +6,6 @@ from joblib import Parallel, delayed
 from .get_abundance import _agg_along_axis
 
 
-
 def _rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray:
     """Rarefy one row k times so that each row sum up to n."""
     depth = arr.sum()
@@ -23,6 +22,7 @@ def _rarefy_array(arr: np.ndarray, n: int, k: int, seed: int = 42) -> np.ndarray
         ],
         axis=0,
     )
+
 
 def _rarefy(
     df: pd.DataFrame, ref: list[int], repeat_num: int = 20
@@ -82,7 +82,6 @@ def rarefy(
     rarefying_value: None | int = None,
     rarefying_key: None | str = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-
     if rarefying_repeat > 1:
         # Rarefying takes place by the following order:
         # - When rarefying_key is specified:
@@ -131,4 +130,3 @@ def rarefy(
         ).reset_index(names=df_meta.index.name)
         df_meta.index = df_otu_count.index
     return df_otu_count, df_meta
-
