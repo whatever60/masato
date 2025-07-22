@@ -9,9 +9,8 @@ from pathlib import Path
 import resource
 
 from Bio.Seq import Seq
-from matplotlib.pyplot import bar
 
-from masato.utils import cat_fastq, cat_fastq_se, smart_open, print_command
+from masato.utils import cat_fastq, cat_fastq_se, print_command
 
 
 def get_rc(seq: str) -> str:

@@ -1,6 +1,6 @@
 import typer
 
-from .basic import combine_trim_clip_pe as _combine_trim_clip_pe
+from .basic import combine_trim_clip_pe as _combine_trim_clip_pe, combine_trim_merge_pe as _combine_trim_merge_pe
 from .camii_isolates import isolate_150_preprocess as _isolate_150_preprocess
 from .rnatag_seq import rnatagseq_150_preprocess as _rnatagseq_150_preprocess
 from ..trim import resolve_input_path
@@ -20,7 +20,7 @@ def combine_trim_clip_pe(
     output_fastq_r2: str = typer.Option(
         ..., "-o2", "--output2", help="Output FASTQ for read 2"
     ),
-    primer_set: str = typer.Option(..., help="Primer set name"),
+    primer_set: str | None = typer.Option(None, help="Primer set name"),
     first_k: int | None = typer.Option(
         None, "-k1", "--first-k1", help="First k bases to keep from read 1"
     ),
@@ -108,6 +108,32 @@ def isolate_150_preprocess(
         min_length=min_length,
         min_length_r2=min_length_r2,
         quality_trimming=quality_trimming,
+        cores=cores,
+    )
+
+
+@app.command()
+def combine_trim_merge_pe(
+    input_dir: str = typer.Option(
+        ..., "-i", "--input-dir", help="Input FASTQ directory"
+    ),
+    output_fastq: str = typer.Option(
+        ..., "-o", "--output", help="Output path for merged FASTQ"
+    ),
+    min_length: int = typer.Option(
+        0, "--min-length", help="Minimum required length after merging"
+    ),
+    cores: int = typer.Option(
+        8, "--cores", help="Number of cores (threads) for fastp to use"
+    ),
+) -> None:
+    """
+    Combines, quality trims, and merges paired-end reads from a directory using fastp.
+    """
+    return _combine_trim_merge_pe(
+        input_dir=input_dir,
+        output_fastq=output_fastq,
+        min_length=min_length,
         cores=cores,
     )
 
