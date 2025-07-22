@@ -3,6 +3,7 @@ import argparse
 import glob
 import io
 import os
+import re
 import subprocess
 import shutil
 import gzip
@@ -686,6 +687,8 @@ def search_global(
         "10",
         "--maxhits",
         "1",
+        "--notrunclabels",
+        "--no_progress",
         "--threads",
         str(num_threads),
     ]
@@ -752,6 +755,14 @@ def search_global_add_unknown(
     _add_unknown(output_path, output_not_matched, unknown_name, output_path)
 
 
+def get_sample_name_from_header(header: str) -> str:
+    """Extract "sample=" from one of the header fields"""
+    for field in re.split(r"[;\s]+", header.strip()):
+        if field.startswith("sample="):
+            return field.split("=")[1]
+    else:
+        raise ValueError(f"Header {header} does not contain 'sample=' field.")
+
 def _add_unknown(
     input_path: str, output_not_matched: str, unknown_name: str, output_path: str
 ) -> None:
@@ -762,7 +773,7 @@ def _add_unknown(
     samples = zotu_table.obs_names
     counter = {i: 0 for i in samples}
     for record in SeqIO.parse(output_not_matched, "fasta"):
-        counter[record.id.split("=")[1]] += 1
+        counter[get_sample_name_from_header(record.description)] += 1
 
     matrix_data = ss.hstack(
         [matrix_data, ss.csr_matrix([counter[i] for i in samples]).T], format="csr"
@@ -898,7 +909,7 @@ def workflow_per_sample(
     for entry in zip(f, f, f, f):
         # Parse the header line to extract the sample name
         header: str = entry[0]
-        sample_name = header.split()[0].split("=")[1].strip()
+        sample_name = get_sample_name_from_header(header)
         if sample_name != current_sample and fastq_for_current_sample:
             if sample_name in samples:
                 raise ValueError(
@@ -963,7 +974,7 @@ def workflow_per_sample(
             for zn, zs, count in zip(zns, zss, counts):
                 if zn == "#UNKNOWN":
                     continue
-                zotus[zs] = zotus.get(zs, 0) + int(count.split("=")[1])
+                zotus[zs] = zotus.get(zs, 0) + count
         # sort by frequency
         records = [
             SeqRecord(Seq(z), id=f"{prefix}{i}", description=str(zotus[z]))
