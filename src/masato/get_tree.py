@@ -89,7 +89,14 @@ def run_fasttree(alignment_file: str, output_tree: str):
     print(f"Running FastTree with command: {' '.join(fasttree_cmd)}")
     # return subprocess.run(fasttree_cmd, capture_output=True, text=True, cwd=".")
     with open(alignment_file, "r") as aln, open(output_tree, "w") as tree:
-        return subprocess.run(fasttree_cmd, stdin=aln, stdout=tree, text=True, cwd=".")
+        return subprocess.run(
+            fasttree_cmd,
+            stdin=aln,
+            stdout=tree,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            cwd=".",
+        )
 
 
 def process_sequences(
