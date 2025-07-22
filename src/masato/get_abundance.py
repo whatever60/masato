@@ -303,9 +303,9 @@ def _taxa_qc(
 
 
 def read_tables(
-    otu_count_table: str,
-    metadata_path: str = None,
-    otu_taxonomy_path: str = None,
+    otu_count_table: str| pd.DataFrame,
+    metadata_path: str | pd.DataFrame| None = None,
+    otu_taxonomy_path: str| pd.DataFrame| None = None,
     warning: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
@@ -343,12 +343,18 @@ def read_tables(
         Sample metadata: pd.DataFrame.
         OTU taxonomy: pd.DataFrame.
     """
-    df_otu_count = read_table(otu_count_table, index_col="#OTU ID")
+    if isinstance(otu_count_table, str):
+        df_otu_count = read_table(otu_count_table, index_col="#OTU ID")
+    else:
+        df_otu_count = otu_count_table.copy()
     if not df_otu_count.columns.is_unique:
         raise ValueError("Sample names in OTU count table must be unique.")
 
     if metadata_path is not None:
-        df_meta = read_table(metadata_path, index_col="sample", comment="#")
+        if isinstance(metadata_path, str):
+            df_meta = read_table(metadata_path, index_col="sample", comment="#")
+        else:
+            df_meta = metadata_path.copy()
         if not df_meta.index.is_unique:
             raise ValueError("Sample names in metadata must be unique.")
 
@@ -380,7 +386,10 @@ def read_tables(
         # df_tax = pd.read_table(otu_taxonomy_path, index_col="otu").rename(
         #     {"otu.1": "otu"}, axis=1
         # )
-        df_tax = read_table(otu_taxonomy_path, index_col="otu")
+        if isinstance(otu_taxonomy_path, str):
+            df_tax = read_table(otu_taxonomy_path, index_col="otu")
+        else:
+            df_tax = otu_taxonomy_path.copy()
         if not df_tax.index.is_unique:
             raise ValueError("OTU numbers in taxonomy table must be unique.")
         # only care about OTUs with taxonomy
@@ -444,16 +453,17 @@ def find_spikein_otus(
 
 
 def get_otu_count(
-    otu_count_table: str,
-    metadata_path: str | None = None,
-    otu_taxonomy_path: str | None = None,
+    otu_count_table: str | pd.DataFrame,
+    metadata_path: str | pd.DataFrame | None = None,
+    otu_taxonomy_path: str | pd.DataFrame | None = None,
     sample_weight_key: str | None = None,
     spikein_taxa_key: str | None = None,
     warning: bool = True,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     df_otu_count, df_meta, df_tax = read_tables(
         otu_count_table, metadata_path, otu_taxonomy_path, warning=warning
     )
+    assert len(df_otu_count) == len(df_meta) and len(df_otu_count.columns) == len(df_tax)
     df_meta = _calc_norm_factor(
         df_otu_count,
         df_meta,
@@ -464,9 +474,9 @@ def get_otu_count(
     df_meta["sequencing_depth"] = df_otu_count.sum(
         axis=1
     ) - df_meta.spikein_reads.to_numpy().clip(0)
-    df_otu_count = df_otu_count.drop(
-        find_spikein_otus(df_meta, df_tax, spikein_taxa_key, only_otus=True), axis=1
-    )
+    spikein_otus = find_spikein_otus(df_meta, df_tax, spikein_taxa_key, only_otus=True)
+    df_otu_count = df_otu_count.drop(spikein_otus, axis=1)
+    df_tax = df_tax.drop(spikein_otus, axis=0)  
     return df_otu_count, df_meta, df_tax
 
 
