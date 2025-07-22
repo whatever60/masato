@@ -83,7 +83,12 @@ def plot_dm(
     distance: str = "braycurtis",
     title: str | None = None,
     hue: str | None = None,
+    hue_order: list[str] | None = None,
+    hue_dict: str | dict | None = None,
     style: str | None = None,
+    style_order: list[str] | None = None,
+    style_dict: dict[str] | bool = True,
+    s: int = 50,
     annotate_dots: bool = False,
     plot_ellipses: bool = False,
     fig: matplotlib.figure.Figure | None = None,
@@ -122,14 +127,15 @@ def plot_dm(
     marker_size = 8
     pc = pd.concat([pc, df_meta], axis=1)
 
-    # markers = {"Bulk": "X", "Plate-R2A": "o", "Plate-TSA": "s"}
     if hue is None:
         pc["_hue"] = "all"
         hue = "_hue"
-    hue_order = sorted(pc[hue].unique().tolist())
+    if hue_order is None:
+        hue_order = sorted(pc[hue].unique().tolist())
+    
     if style is None:
         style_order = None
-    else:
+    elif style_order is None:
         style_order = sorted(pc[style].unique().tolist())
 
     axis_label_fs = 14
@@ -146,10 +152,12 @@ def plot_dm(
         y="PC2",
         hue=hue,
         hue_order=hue_order,
+        palette=hue_dict,
         style=style,
-        # markers=markers,
+        markers=style_dict,
         style_order=style_order,
         linewidth=0,
+        s=s,
         legend=False,
         ax=axs[0],
     )
@@ -162,10 +170,13 @@ def plot_dm(
         y="PC3",
         hue=hue,
         hue_order=hue_order,
+        palette=hue_dict,
         style=style,
-        # markers=markers,
+        markers=style_dict,
         style_order=style_order,
         linewidth=0,
+        s=s,
+        legend=True,
         ax=axs[1],
     )
     axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
