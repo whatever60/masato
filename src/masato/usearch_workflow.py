@@ -535,7 +535,7 @@ def cluster_uparse(
 
 
 def unoise3(
-    input_fastq: str | IO[str] | gzip.GzipFile,
+    input_fastq: str | IO[str] | gzip.GzipFile | bytes,
     output_fasta: str | IO[str] | gzip.GzipFile | None,
     min_size: int,
     alpha: float = 2.0,
@@ -630,6 +630,8 @@ def unoise3(
     if stdin is subprocess.PIPE:
         if isinstance(input_fastq, str):
             qc_proc.communicate(input_fastq.encode())
+        elif isinstance(input_fastq, bytes):
+            qc_proc.communicate(input_fastq)
         else:
             # If input_fastq is a file-like object, we shouldn't reach here
             # because _decide_io_arg would have set stdin to input_fastq, not PIPE
@@ -642,7 +644,7 @@ def unoise3(
 
 
 def search_global(
-    input_fastq: str | gzip.GzipFile | IO[str] | None,
+    input_fastq: str | gzip.GzipFile | IO[str] | None | bytes,
     zotu_fasta: str | gzip.GzipFile | IO[str] | None,
     output_tsv: str | gzip.GzipFile | IO[str] | None,
     not_matched_fasta: str | gzip.GzipFile | IO[str] | None = None,
@@ -687,7 +689,6 @@ def search_global(
         "10",
         "--maxhits",
         "1",
-        "--notrunclabels",
         "--no_progress",
         "--threads",
         str(num_threads),
@@ -710,9 +711,20 @@ def search_global(
         stdout=stdout,
         stderr=stderr,
     )
-    sg_proc_out, sg_proc_err = sg_proc.communicate(
-        input_fastq.encode() if stdin is subprocess.PIPE else None
-    )
+    if stdin is subprocess.PIPE:
+        if isinstance(input_fastq, str):
+            comm_input = input_fastq.encode()
+        elif isinstance(input_fastq, bytes):
+            comm_input = input_fastq
+        else:
+            # If input_fastq is a file-like object, we shouldn't reach here
+            # because _decide_io_arg would have set stdin to input_fastq, not PIPE
+            raise TypeError(
+                f"Expected input_fastq to be str or bytes when stdin is PIPE, got {type(input_fastq)}"
+            )
+    else:
+        comm_input = None
+    sg_proc_out, sg_proc_err = sg_proc.communicate(comm_input)
     if stdout is subprocess.PIPE:
         return sg_proc_out.decode()
 
@@ -789,6 +801,8 @@ def _add_unknown(
 def _decide_io_arg(arg) -> tuple:
     if arg is None:  # PIPE as IO
         return "-", subprocess.PIPE
+    elif isinstance(arg, bytes):
+        return "-", subprocess.PIPE
     elif isinstance(arg, str):
         if "\n" in arg:  # string literal corresponding to file content
             return "-", subprocess.PIPE
@@ -816,14 +830,21 @@ def _decide_io_arg(arg) -> tuple:
 
 
 def _workflow_one_sample(
-    seqs_sample: list[str],
+    seqs_sample: list[str] | list[bytes],
     min_size: int,
     alpha: float,
     prefix: str | None = None,
     search: bool = True,
 ) -> tuple[list[str], list[str], list[int]]:
     num_qs = len(seqs_sample)
-    input_fastq = "".join(seqs_sample)
+    if isinstance(seqs_sample[0], bytes):
+        input_fastq = b"".join(seqs_sample)
+    elif isinstance(seqs_sample[0], str):
+        input_fastq = "".join(seqs_sample)
+    else:
+        raise TypeError(
+            f"Expected seqs_sample to be a list of str or bytes, got {type(seqs_sample[0])}"
+        )
     db_fasta = tempfile.NamedTemporaryFile()
     unoise3(
         input_fastq,
@@ -894,7 +915,7 @@ def workflow_per_sample(
     from masato.utils import smart_open
 
     current_sample = None
-    fastq_for_current_sample = []
+    fastq_for_current_sample: list[bytes] = []
     future2sample = {}
     samples = set()
     # sample2future = {}
@@ -906,7 +927,8 @@ def workflow_per_sample(
         else None
     )
     f: IO[str] = smart_open(input_fastq, "r")
-    for entry in zip(f, f, f, f):
+    # prog_bar = tqdm()
+    for i, entry in enumerate(zip(f, f, f, f)):
         # Parse the header line to extract the sample name
         header: str = entry[0]
         sample_name = get_sample_name_from_header(header)
@@ -914,7 +936,7 @@ def workflow_per_sample(
             if sample_name in samples:
                 raise ValueError(
                     "Sequences in fastq file are not grouped by sample, found "
-                    f"{sample_name} both before {current_sample} and after"
+                    f"{sample_name} both before {current_sample} and after it at the {i}th entry."
                 )
             if executor:
                 future = executor.submit(
@@ -933,10 +955,14 @@ def workflow_per_sample(
                 )
             fastq_for_current_sample = []  # Reset for the next sample
             samples.add(current_sample)
+            # prog_bar.update(1)
         current_sample = sample_name
-        fastq_for_current_sample.append("".join(entry))
+        fastq_for_current_sample.append("".join(entry).encode())
     f.close()
+
     # Don't forget to process the last sample
+    samples.add(current_sample)
+    print(f"Found {len(samples)} samples.")
     if fastq_for_current_sample:
         if executor:
             future = executor.submit(
@@ -953,6 +979,7 @@ def workflow_per_sample(
                 # start the task and save the future object
                 sample = future2sample[future]
                 results[sample] = future.result()
+            assert len(samples) == len(future2sample) == len(results)
             results = {s: results[s] for s in samples}
         else:
             results[current_sample] = _workflow_one_sample(
@@ -1038,9 +1065,8 @@ def aggregate_samples(
 
     for sequence, zotu_name in sequence_to_zotu.items():
         index.append(zotu_name)
-        for key in key_sequence_counts:
+        for key in key_sequence_counts | unknown_counts:
             df_data[key].append(key_sequence_counts[key].get(sequence, 0))
-
     # Add #UNKNOWN to the DataFrame as the last row
     # if "#UNKNOWN" in unknown_count:
     if unknown_counts:

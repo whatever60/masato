@@ -2,10 +2,10 @@ import os
 import sys
 from typing import Annotated
 
-import cyclopts
 from cyclopts import App, Parameter
 
 from .utils import cat_fastq as _cat_fastq
+
 
 app = App(
     help="Concatenate paired-end FASTQ files.",
@@ -87,7 +87,3 @@ def cat_fastq(
         _remove_undet=remove_undet,
         _have_sample_name=have_sample_name,
     )
-
-
-def cat_fastq_cli():
-    cyclopts.run(cat_fastq)

@@ -164,6 +164,7 @@ def combine_trim_merge_pe(
     fastp_proc = subprocess.Popen(
         proc_args,
         stdin=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
     )
 
     # Assuming `cat_fastq` is defined elsewhere and handles writing to the process stdin

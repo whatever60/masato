@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set the data directory from the environment variable
-data_dir=/home/whatever60/dev/easy_amplicon_restructure/tests/data
+data_dir=/home/whatever60/dev/masato/tests/data
 data_dir=~/data/easy_amplicon_camii_test_data
 data_dir=/mnt/c/aws_data/data/camii_demo/demo_20241105_output
 
