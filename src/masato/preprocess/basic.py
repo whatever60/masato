@@ -88,7 +88,7 @@ def combine_trim_clip_pe(
             "--interleaved_in",
             "--stdout",
             "--cut_right",
-            "--correct",
+            "--correction",
             "--thread",
             "1",  # Threads can only be 1 for consistent output order as input
             "--json",

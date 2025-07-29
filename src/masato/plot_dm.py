@@ -91,8 +91,9 @@ def plot_dm(
     s: int = 50,
     annotate_dots: bool = False,
     plot_ellipses: bool = False,
+    plot_pc3: bool = True,
     fig: matplotlib.figure.Figure | None = None,
-    axs: list[matplotlib.axes.Axes] | None = None,
+    axs: list[matplotlib.axes.Axes] | matplotlib.axes.Axes | None = None,
 ) -> None:
     n_components = min(10, *df_otu_count.shape)
     n_pcs = min(3, n_components)
@@ -132,7 +133,7 @@ def plot_dm(
         hue = "_hue"
     if hue_order is None:
         hue_order = sorted(pc[hue].unique().tolist())
-    
+
     if style is None:
         style_order = None
     elif style_order is None:
@@ -140,11 +141,21 @@ def plot_dm(
 
     axis_label_fs = 14
     title_fs = 16
+
+    # prepare figure and axes
     if fig is None or axs is None:
-        fig, axs = plt.subplots(1, 2, figsize=(8, 3.5))
+        if plot_pc3:
+            fig, axs = plt.subplots(1, 2, figsize=(8, 3.5))
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(5.5, 4))
+            axs = [ax]
     else:
-        if not len(axs) == 2:
-            raise ValueError(f"Expected 2 axes, got {len(axs)}.")
+        expected_axs = 2 if plot_pc3 else 1
+        if isinstance(axs, matplotlib.axes.Axes):
+            axs = [axs]
+        if len(axs) != expected_axs:
+            raise ValueError(f"Expected {expected_axs} axes, got {len(axs)}.")
+
     axs: list[matplotlib.axes.Axes]
     sns.scatterplot(
         data=pc,
@@ -158,91 +169,105 @@ def plot_dm(
         style_order=style_order,
         linewidth=0,
         s=s,
-        legend=False,
+        legend=not plot_pc3,  # Show legend here only if it's the single plot
         ax=axs[0],
     )
     axs[0].set_xlabel(f"PC1 ({variance[0] * 100:.2f}%)", fontsize=axis_label_fs)
     axs[0].set_ylabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
 
-    sns.scatterplot(
-        data=pc,
-        x="PC2",
-        y="PC3",
-        hue=hue,
-        hue_order=hue_order,
-        palette=hue_dict,
-        style=style,
-        markers=style_dict,
-        style_order=style_order,
-        linewidth=0,
-        s=s,
-        legend=True,
-        ax=axs[1],
-    )
-    axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
-    axs[1].set_ylabel(f"PC3 ({variance[2] * 100:.2f}%)", fontsize=axis_label_fs)
+    if plot_pc3:
+        sns.scatterplot(
+            data=pc,
+            x="PC2",
+            y="PC3",
+            hue=hue,
+            hue_order=hue_order,
+            palette=hue_dict,
+            style=style,
+            markers=style_dict,
+            style_order=style_order,
+            linewidth=0,
+            s=s,
+            legend=True,  # Legend is on this plot if it exists
+            ax=axs[1],
+        )
+        axs[1].set_xlabel(f"PC2 ({variance[1] * 100:.2f}%)", fontsize=axis_label_fs)
+        axs[1].set_ylabel(f"PC3 ({variance[2] * 100:.2f}%)", fontsize=axis_label_fs)
 
     # set axis to be square
     for ax in axs:
         xleft, xright = ax.get_xlim()
         ybottom, ytop = ax.get_ylim()
         ax.set_aspect(abs((xright - xleft) / (ybottom - ytop)), adjustable="box")
-
+    legend_ax = axs[-1]  # Target the last axis for legend modifications
     if hue != "_hue":
-        # set legend markers under `hue` to o
+        handles, labels = legend_ax.get_legend_handles_labels()
         hues = pc[hue].unique().tolist()
-        handles, labels = axs[1].get_legend_handles_labels()
         for h, label in zip(handles, labels):
             if label in hues:
-                # set marker size to s and marker to o
                 h.set_marker("o")
             h.set_markersize(marker_size)
-        axs[1].legend(handles, labels)
-
-    axs[1].legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
+        legend_ax.legend(handles, labels)
+    legend_ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0.0)
 
     if annotate_dots:
         for i, txt in enumerate(pc.index):
-            # annotate with small fontsize
             axs[0].annotate(
                 txt, (pc["PC1"].iloc[i], pc["PC2"].iloc[i]), fontsize=6, alpha=0.4
             )
-            axs[1].annotate(
-                txt, (pc["PC2"].iloc[i], pc["PC3"].iloc[i]), fontsize=6, alpha=0.4
-            )
+            if plot_pc3:
+                axs[1].annotate(
+                    txt, (pc["PC2"].iloc[i], pc["PC3"].iloc[i]), fontsize=6, alpha=0.4
+                )
 
     if plot_ellipses:
-        for pc_dims, ax in zip([(1, 2), (2, 3)], axs):
-            n = len(pc[hue].unique())
-            row_colors = sns.color_palette("tab10", n)
-            for group in pc[hue].unique():
-                x = pc.loc[pc[hue] == group, f"PC{pc_dims[0]}"]
-                y = pc.loc[pc[hue] == group, f"PC{pc_dims[1]}"]
+        pc_dims_list, ax_list = (
+            ([(1, 2), (2, 3)], axs) if plot_pc3 else ([(1, 2)], [axs[0]])
+        )
+        n_hues = len(hue_order)
+        palette = (
+            sns.color_palette(hue_dict, n_hues)
+            if isinstance(hue_dict, str)
+            else (
+                list(hue_dict.values())
+                if isinstance(hue_dict, dict)
+                else sns.color_palette(n_colors=n_hues)
+            )
+        )
+        hue_to_color = dict(zip(hue_order, palette))
+
+        for pc_dims, ax in zip(pc_dims_list, ax_list):
+            for group in hue_order:
+                group_data = pc.loc[pc[hue] == group]
+                x = group_data[f"PC{pc_dims[0]}"]
+                y = group_data[f"PC{pc_dims[1]}"]
+                if len(x) < 2:
+                    continue
+
                 mean_x, mean_y = x.mean(), y.mean()
                 cov = np.cov(x, y)
                 lambda_, v = eigsorted(cov)
                 theta = np.degrees(np.arctan2(*v[:, 0][::-1]))
-                w, h = 2 * 2 * np.sqrt(lambda_)
+                w, h = 4 * np.sqrt(lambda_)  # 2 * std_dev
                 ell = Ellipse(
-                    xy=(mean_x, mean_y),
-                    width=w,
-                    height=h,
-                    angle=theta,
-                    # color=row_colors[pc["sample_group"].unique().tolist().index(group)],
-                    alpha=0.2,
+                    xy=(mean_x, mean_y), width=w, height=h, angle=theta, alpha=0.2
                 )
-                ell.set_facecolor(row_colors[pc[hue].unique().tolist().index(group)])
+                ell.set_facecolor(hue_to_color[group])
                 ell.set_edgecolor("grey")
                 ax.add_artist(ell)
 
-    if title is not None:
+    if title:
         fig.suptitle(title, fontsize=title_fs)
-    fig.subplots_adjust(top=0.6)
-    if fig_path is not None:
-        # fig.tight_layout()
+
+    fig.tight_layout()
+    # Adjust layout after tight_layout to prevent title overlap
+    if title:
+        fig.subplots_adjust(top=0.88)
+
+    if fig_path:
         fig.savefig(fig_path, dpi=300, bbox_inches="tight")
-        # also save a pdf file
         fig.savefig(os.path.splitext(fig_path)[0] + ".svg", bbox_inches="tight")
+
     return fig, axs
 
 
