@@ -120,8 +120,8 @@ def combine_trim_merge_pe(
     output_fastq: str = typer.Option(
         ..., "-o", "--output", help="Output path for merged FASTQ"
     ),
-    min_length: int = typer.Option(
-        0, "--min-length", help="Minimum required length after merging"
+    min_length: int | None = typer.Option(
+        None, "--min-length", help="Minimum required length after merging"
     ),
     cores: int = typer.Option(
         8, "--cores", help="Number of cores (threads) for fastp to use"

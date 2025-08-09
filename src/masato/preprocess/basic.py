@@ -118,7 +118,8 @@ def combine_trim_clip_pe(
 def combine_trim_merge_pe(
     input_dir: str,
     output_fastq: str,
-    min_length: int,
+    *,
+    min_length: int | None = None,
     cores: int,
 ) -> None:
     """
@@ -131,14 +132,15 @@ def combine_trim_merge_pe(
     fastp_output_dir = os.path.join(output_dir, "fastp")
     os.makedirs(fastp_output_dir, exist_ok=True)
 
-    proc_args = [
-        "fastp",
-        "--stdin",
-        "--interleaved_in",
-        "--thread",  # Use --thread as requested
-        str(cores),
-        "--length_required",
-        str(min_length),
+    proc_args = ["fastp", "--stdin", "--interleaved_in", "--thread", str(cores)]
+    if min_length is None:  # Whatever fastp defaults to.
+        pass
+    # elif min_length == 0:
+    #     proc_args += ["--disable_length_filtering"]
+    else:
+        proc_args += ["--length_required", str(min_length)]
+    
+    proc_args += [
         "--cut_right",
         "--merge",
         "--merged_out",
@@ -166,6 +168,7 @@ def combine_trim_merge_pe(
         stdin=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
+    print_command(proc_args)
 
     # Assuming `cat_fastq` is defined elsewhere and handles writing to the process stdin
     cat_fastq(input_dir, output_fp_r1=fastp_proc.stdin, output_fp_r2=fastp_proc.stdin)
