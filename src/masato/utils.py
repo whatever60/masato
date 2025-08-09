@@ -15,6 +15,7 @@ from .io import read_table, write_table  # used by other modules.
 
 
 PATTERN_ILLUMINA = re.compile(r"^(.+?)_S\d+_(?:L\d{3}_)?(R[12])_001.f(ast)?q(.gz)?$")
+PATTERN_ILLUMINA_SHORT = re.compile(r"^(.+?)_(R[12])_001.f(ast)?q(.gz)?$")
 # - sample_R1.fq.gz or sample_R2.fq.gz (or fastq.gz, same for the following)
 # - sample_1.fq.gz or sample_2.fq.gz
 # - sample.R1.fq.gz or sample.R2.fq.gz
@@ -59,7 +60,7 @@ def find_paired_end_files(fastq_input: str | list[str]) -> list[tuple[str, str, 
     file_pairs: dict[tuple[str, str], str] = {}
     # Process each file using pattern functions
     for file_ in fastq_files:
-        for pattern in [PATTERN_ILLUMINA, PATTERN_CUSTOM]:
+        for pattern in [PATTERN_ILLUMINA, PATTERN_ILLUMINA_SHORT, PATTERN_CUSTOM]:
             match = pattern.search(os.path.basename(file_))
             if match:
                 sample_name, read_type = match.groups()[:2]
@@ -283,7 +284,7 @@ def cat_fastq_se(
 
     files = []
     for file_ in fastq_files:
-        for pattern in [PATTERN_ILLUMINA, PATTERN_CUSTOM]:
+        for pattern in [PATTERN_ILLUMINA, PATTERN_ILLUMINA_SHORT, PATTERN_CUSTOM]:
             match = pattern.search(os.path.basename(file_))
             if match:
                 sample_name, read_type = match.groups()[:2]
@@ -358,17 +359,23 @@ def _rename_read_illumina(
     """
     # Remove '@' and split by space, take first part
     original_header = header_line[1:].strip()
-    return f"@{original_header} {read_index} ;sample={sample_name}\n"
+    original_name, original_desc = original_header.split(maxsplit=1)
+    # return f"@{original_header} {read_index} ;sample={sample_name}\n"
+    return f"@{original_name};sample={sample_name} {original_desc} {read_index}\n"
 
 
 def _rename_read_concat(
     header_line: str, sample_name: str, read_number: int, read_index: int
 ) -> str:
     original_header = header_line[1:].strip()
-    assert original_header.split()[-1].startswith(";sample="), (
-        "Header line must end with ';sample='"
-    )
-    return f"@{original_header}_{sample_name}\n"
+    # assert original_header.split()[-1].startswith(";sample="), (
+    #     "Header line must end with ';sample='"
+    # )
+    # return f"@{original_header}_{sample_name}\n"
+    original_name, original_desc = original_header.split(maxsplit=1)
+    assert len(original_name.split(";sample=")) == 2, original_name
+    return f"@{original_name}_{sample_name} {original_desc}\n"
+
 
 
 def print_command(command: str | list[str]) -> None:
