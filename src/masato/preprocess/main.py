@@ -123,6 +123,9 @@ def combine_trim_merge_pe(
     min_length: int | None = typer.Option(
         None, "--min-length", help="Minimum required length after merging"
     ),
+    min_overlap: int | None = typer.Option(
+        None, "--min-overlap", help="Minimum overlap length for merging reads"
+    ),
     cores: int = typer.Option(
         8, "--cores", help="Number of cores (threads) for fastp to use"
     ),
@@ -134,6 +137,7 @@ def combine_trim_merge_pe(
         input_dir=input_dir,
         output_fastq=output_fastq,
         min_length=min_length,
+        min_overlap=min_overlap,
         cores=cores,
     )
 

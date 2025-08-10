@@ -120,6 +120,7 @@ def combine_trim_merge_pe(
     output_fastq: str,
     *,
     min_length: int | None = None,
+    min_overlap: int | None = None,
     cores: int,
 ) -> None:
     """
@@ -139,8 +140,11 @@ def combine_trim_merge_pe(
     #     proc_args += ["--disable_length_filtering"]
     else:
         proc_args += ["--length_required", str(min_length)]
+    if min_overlap is not None:
+        proc_args += ["--overlap_len_require", str(min_overlap)]
     
     proc_args += [
+        "--correction",
         "--cut_right",
         "--merge",
         "--merged_out",
