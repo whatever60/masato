@@ -7,8 +7,8 @@ import re
 import subprocess
 import shutil
 import gzip
-from typing import IO
-from io import StringIO
+from typing import TextIO, BinaryIO
+from io import BytesIO, StringIO
 import tempfile
 from concurrent.futures import as_completed
 import json
@@ -25,7 +25,7 @@ import biom
 import anndata as ad
 from tqdm.auto import tqdm
 
-from masato.utils import read_table, write_table
+from masato.utils import print_command, read_table, write_table
 
 
 def merge_pairs(
@@ -535,8 +535,8 @@ def cluster_uparse(
 
 
 def unoise3(
-    input_fastq: str | IO[str] | gzip.GzipFile | bytes,
-    output_fasta: str | IO[str] | gzip.GzipFile | None,
+    input_fastq: str | TextIO | BinaryIO | bytes,
+    output_fasta: str | TextIO | BinaryIO | None,
     min_size: int,
     alpha: float = 2.0,
     min_length: int = 0,
@@ -644,17 +644,46 @@ def unoise3(
 
 
 def search_global(
-    input_fastq: str | gzip.GzipFile | IO[str] | None | bytes,
-    zotu_fasta: str | gzip.GzipFile | IO[str] | None,
-    output_tsv: str | gzip.GzipFile | IO[str] | None,
-    not_matched_fasta: str | gzip.GzipFile | IO[str] | None = None,
+    input_fastq: str | TextIO | BinaryIO | None | bytes,
+    zotu_fasta: str | TextIO | BinaryIO | None,
+    output_tsv: str | TextIO | BinaryIO | None,
+    output_blast6: str | None = None,
+    not_matched_fasta: str | TextIO | BinaryIO | None = None,
     id_: float = 0.97,
     num_threads: int = 8,
     stderr: bool = True,
 ) -> None | str:
-    """
-    When `output_csv` is None, output is in captured in the stdout of returned process.
-    When `not_matched_fasta` is None, unmatched query sequences are not saved as fasta.
+    """Wraps the vsearch --usearch_global command.
+
+    This function determines how to handle inputs and outputs based on their type,
+    allowing for files on disk, in-memory objects, or piped streams.
+
+    Args:
+        input_fastq: The query sequences. Can be a:
+            - `str`: Path to a FASTA/FASTQ file.
+            - `str`: Multi-line string containing file content.
+            - `bytes`: Byte-string containing file content.
+            - file-like object: e.g., `gzip.GzipFile`, `io.StringIO`, or `subprocess.PIPE`.
+        zotu_fasta: The database sequences. Accepts the same types as `input_fastq`.
+        output_tsv: The primary output destination for the OTU table. Can be a:
+            - `str`: Path to an output file (e.g., 'out.tsv', 'out.biom').
+            - `None`: Captures the output as a string, which is then returned by the function.
+            - file-like object: Stream to write the output to.
+        output_blast6: Optional file path (`str`) to save a BLAST-like table with a CIGAR string.
+            If `None`, this output is not generated.
+        not_matched_fasta: Optional destination for sequences that did not find a match.
+            Accepts the same types as `output_tsv`. If `None`, this output is not generated.
+        id_: The minimum identity threshold for a match (0.0 to 1.0).
+        num_threads: The number of threads for vsearch to use.
+        stderr: If `True`, vsearch's standard error is printed; otherwise, it's suppressed.
+
+    Returns:
+        - `str`: The captured stdout content if `output_tsv` is `None`.
+        - `None`: If output is written to a file or stream.
+
+    Raises:
+        ValueError: If both an input and a database are provided as streams,
+            or if multiple outputs are specified as streams.
     """
     fastq_arg, stdin = _decide_io_arg(input_fastq)
     db_arg, stdin_db = _decide_io_arg(zotu_fasta)
@@ -663,14 +692,17 @@ def search_global(
         not_matched_arg, stdout_not_matched = None, None
     else:
         not_matched_arg, stdout_not_matched = _decide_io_arg(not_matched_fasta)
+
     if stdin is not None and stdin_db is not None:
         raise ValueError(
             "`input_fastq` and `zotu_fasta` cannot both be file-like objects."
         )
+
     if stdout is not None and stdout_not_matched is not None:
         raise ValueError(
             "`output_tsv` and `not_matched_fasta` cannot both be file-like objects."
         )
+
     stderr = subprocess.DEVNULL if not stderr else None
     # https://github.com/torognes/vsearch/issues/552
     # https://github.com/torognes/vsearch/issues/467
@@ -693,6 +725,7 @@ def search_global(
         "--threads",
         str(num_threads),
     ]
+
     if tsv_arg == "-":
         args_search.extend(["--otutabout", "-"])
     elif tsv_arg.endswith(".tsv") or tsv_arg.endswith(".tsv.gz"):
@@ -703,14 +736,22 @@ def search_global(
         raise ValueError(
             f"Invalid output file extension {output_tsv}. Must be one of .tsv, .biom"
         )
+
     if not_matched_arg is not None:
         args_search.extend(["--notmatched", not_matched_arg])
-    sg_proc = subprocess.Popen(
-        args_search,
-        stdin=stdin,
-        stdout=stdout,
-        stderr=stderr,
-    )
+
+    if output_blast6 is not None:
+        args_search.extend(
+            [
+                "--userout",
+                output_blast6,
+                "--userfields",
+                "query+target+id+alnlen+mism+opens+qlo+qhi+tlo+thi+evalue+bits+caln",
+                "--output_no_hits",
+            ]
+        )
+    sg_proc = subprocess.Popen(args_search, stdin=stdin, stdout=stdout, stderr=stderr)
+
     if stdin is subprocess.PIPE:
         if isinstance(input_fastq, str):
             comm_input = input_fastq.encode()
@@ -724,7 +765,9 @@ def search_global(
             )
     else:
         comm_input = None
+
     sg_proc_out, sg_proc_err = sg_proc.communicate(comm_input)
+
     if stdout is subprocess.PIPE:
         return sg_proc_out.decode()
 
@@ -748,6 +791,7 @@ def search_global_add_unknown(
     id_: float,
     unknown_name: str,
     num_threads: int,
+    output_blast6: str | None = None,
 ) -> None:
     if not os.path.isfile(zotu_fasta):
         raise ValueError(f"ZOTU fasta file (database) {zotu_fasta} does not exist")
@@ -762,7 +806,13 @@ def search_global_add_unknown(
     output_not_matched = os.path.join(output_dir, "notmatched.fa")
 
     search_global(
-        input_fastq, zotu_fasta, output_path, output_not_matched, id_, num_threads
+        input_fastq,
+        zotu_fasta,
+        output_tsv=output_path,
+        output_blast6=output_blast6,
+        not_matched_fasta=output_not_matched,
+        id_=id_,
+        num_threads=num_threads,
     )
     _add_unknown(output_path, output_not_matched, unknown_name, output_path)
 
@@ -774,6 +824,7 @@ def get_sample_name_from_header(header: str) -> str:
             return field.split("=")[1]
     else:
         raise ValueError(f"Header {header} does not contain 'sample=' field.")
+
 
 def _add_unknown(
     input_path: str, output_not_matched: str, unknown_name: str, output_path: str
@@ -798,15 +849,39 @@ def _add_unknown(
     write_table(zotu_table, output_path)
 
 
-def _decide_io_arg(arg) -> tuple:
-    if arg is None:  # PIPE as IO
+def _decide_io_arg(
+    arg: str | bytes | TextIO | BinaryIO | subprocess.Popen | None,
+) -> tuple[str, int | TextIO | BinaryIO | subprocess.Popen | None]:
+    """Decides how an argument should be passed to a subprocess command.
+
+    This function inspects the argument's type to determine if it represents
+    a file path, in-memory content that needs to be piped, or an existing
+    file-like object (stream) that can be used directly.
+
+    Args:
+        arg: The input or output argument to process. It can be:
+            - `str` (file path): Treated as a path on the filesystem.
+            - `str` (multi-line): Treated as file content to be piped.
+            - `bytes`: Treated as file content to be piped.
+            - `None`: Represents a stream to be piped (e.g., for capturing stdout).
+            - file-like object (`IO`, `gzip.GzipFile`, etc.): An existing stream.
+
+    Returns:
+        A tuple `(command_arg, popen_arg)` where:
+        - `command_arg` (str): The string to be used in the command list.
+          This will be the file path or "-" for a stream.
+        - `popen_arg`: The object to be passed to the `stdin`, `stdout`, or
+          `stderr` parameter of `subprocess.Popen`. This will be a file-like
+          object, `subprocess.PIPE`, or `None`.
+    """
+    if arg is None:  # Represents a PIPE for capturing output or providing no input
         return "-", subprocess.PIPE
-    elif isinstance(arg, bytes):
+    elif isinstance(arg, bytes):  # In-memory bytes content
         return "-", subprocess.PIPE
     elif isinstance(arg, str):
-        if "\n" in arg:  # string literal corresponding to file content
+        if "\n" in arg:  # In-memory string content
             return "-", subprocess.PIPE
-        else:  # file path
+        else:  # A file path
             arg = os.path.abspath(arg)
             if (
                 not os.path.isfile(arg)
@@ -814,15 +889,16 @@ def _decide_io_arg(arg) -> tuple:
                 and not os.path.isdir(os.path.dirname(arg))
             ):
                 raise ValueError(
-                    f"{arg} does not appear to be stirng liternal and is also not a file path."
+                    f"{arg} does not appear to be string literal and is also not a file path."
                 )
             return arg, None
-    elif isinstance(arg, StringIO):
+    elif isinstance(arg, StringIO):  # In-memory string stream
         return "-", subprocess.PIPE
     else:
+        # Any other file-like object (e.g., gzip.GzipFile, process stdout)
         if (
-            not isinstance(arg, gzip.GzipFile)
-            and not isinstance(arg, IO[str])
+            not hasattr(arg, "read")
+            and not hasattr(arg, "write")
             and not isinstance(arg, subprocess.Popen)
         ):
             raise ValueError(f"Invalid argument {arg} of type {type(arg)}")
@@ -1521,6 +1597,12 @@ def main():
     search_global_parser.add_argument(
         "-t", "--num_threads", type=int, default=8, help="Number of threads to use"
     )
+    search_global_parser.add_argument(
+        "--output_blast6",
+        help="Optional file path to save a BLAST-like table with CIGAR string",
+        type=str,
+        default=None,
+    )
     workflow_per_sample_parser = subparsers.add_parser(
         "workflow_per_sample", help="Run UNOISE3 workflow per sample"
     )
@@ -1629,6 +1711,7 @@ def main():
             id_=args.id,
             unknown_name=args.unknown_name,
             num_threads=args.num_threads,
+            output_blast6=args.output_blast6,
         )
     elif args.subcommand == "workflow_per_sample":
         workflow_per_sample(
