@@ -6,9 +6,9 @@ import os
 import re
 import subprocess
 import shutil
-import gzip
 from typing import TextIO, BinaryIO
 from io import BytesIO, StringIO
+from textwrap import dedent
 import tempfile
 from concurrent.futures import as_completed
 import json
@@ -644,47 +644,42 @@ def unoise3(
 
 
 def search_global(
-    input_fastq: str | TextIO | BinaryIO | None | bytes,
+    input_fastq: str | bytes | TextIO | BinaryIO | None,
     zotu_fasta: str | TextIO | BinaryIO | None,
     output_tsv: str | TextIO | BinaryIO | None,
     output_blast6: str | None = None,
+    unknown_name: str = "U-UNKNOWN",  # Used with output_blast6
     not_matched_fasta: str | TextIO | BinaryIO | None = None,
     id_: float = 0.97,
     num_threads: int = 8,
     stderr: bool = True,
 ) -> None | str:
-    """Wraps the vsearch --usearch_global command.
+    """Wrap vsearch --usearch_global and (optionally) emit BLAST6 as Parquet via DuckDB.
 
-    This function determines how to handle inputs and outputs based on their type,
-    allowing for files on disk, in-memory objects, or piped streams.
+    DuckDB is used (CLI) to read the BLAST6 stream from a FIFO, derive a `group`
+    column from the `query` field (`;sample=...`), and write Parquet with ZSTD.
 
     Args:
-        input_fastq: The query sequences. Can be a:
-            - `str`: Path to a FASTA/FASTQ file.
-            - `str`: Multi-line string containing file content.
-            - `bytes`: Byte-string containing file content.
-            - file-like object: e.g., `gzip.GzipFile`, `io.StringIO`, or `subprocess.PIPE`.
-        zotu_fasta: The database sequences. Accepts the same types as `input_fastq`.
-        output_tsv: The primary output destination for the OTU table. Can be a:
-            - `str`: Path to an output file (e.g., 'out.tsv', 'out.biom').
-            - `None`: Captures the output as a string, which is then returned by the function.
-            - file-like object: Stream to write the output to.
-        output_blast6: Optional file path (`str`) to save a BLAST-like table with a CIGAR string.
-            If `None`, this output is not generated.
-        not_matched_fasta: Optional destination for sequences that did not find a match.
-            Accepts the same types as `output_tsv`. If `None`, this output is not generated.
-        id_: The minimum identity threshold for a match (0.0 to 1.0).
-        num_threads: The number of threads for vsearch to use.
-        stderr: If `True`, vsearch's standard error is printed; otherwise, it's suppressed.
+        input_fastq: Query sequences (path/bytes/str/file-like).
+        zotu_fasta: Database sequences (path/str/file-like).
+        output_tsv: OTU table destination ('.tsv', '.tsv.gz', '.biom', or '-' for stdout).
+        output_blast6: Optional Parquet path ('.parquet' or '.pq') for BLAST-like output.
+        not_matched_fasta: Optional destination for sequences without hits.
+        id_: Minimum identity threshold (0-1).
+        num_threads: Threads for vsearch.
+        stderr: If True, show subprocess stderr; else suppress.
 
     Returns:
-        - `str`: The captured stdout content if `output_tsv` is `None`.
-        - `None`: If output is written to a file or stream.
+        Captured stdout (str) if `output_tsv` is None, else None.
 
     Raises:
-        ValueError: If both an input and a database are provided as streams,
-            or if multiple outputs are specified as streams.
+        ValueError: On incompatible IO combinations or invalid paths/extensions.
+        RuntimeError: If DuckDB conversion fails.
     """
+
+    def _sql_quote(path: str) -> str:
+        return path.replace("'", "''")
+
     fastq_arg, stdin = _decide_io_arg(input_fastq)
     db_arg, stdin_db = _decide_io_arg(zotu_fasta)
     tsv_arg, stdout = _decide_io_arg(output_tsv)
@@ -703,10 +698,8 @@ def search_global(
             "`output_tsv` and `not_matched_fasta` cannot both be file-like objects."
         )
 
-    stderr = subprocess.DEVNULL if not stderr else None
-    # https://github.com/torognes/vsearch/issues/552
-    # https://github.com/torognes/vsearch/issues/467
-    # https://github.com/torognes/vsearch/issues/392
+    stderr_stream = subprocess.DEVNULL if not stderr else None
+
     args_search = [
         "vsearch",
         "--usearch_global",
@@ -726,50 +719,137 @@ def search_global(
         str(num_threads),
     ]
 
+    # Decide OTU table sink
     if tsv_arg == "-":
         args_search.extend(["--otutabout", "-"])
-    elif tsv_arg.endswith(".tsv") or tsv_arg.endswith(".tsv.gz"):
+    elif isinstance(tsv_arg, str) and (
+        tsv_arg.endswith(".tsv") or tsv_arg.endswith(".tsv.gz")
+    ):
         args_search.extend(["--otutabout", tsv_arg])
-    elif output_tsv.endswith(".biom"):
+    elif isinstance(tsv_arg, str) and tsv_arg.endswith(".biom"):
         args_search.extend(["--biomout", tsv_arg])
     else:
         raise ValueError(
-            f"Invalid output file extension {output_tsv}. Must be one of .tsv, .biom"
+            f"Invalid output file for OTU table: {output_tsv!r} (use .tsv, .tsv.gz, .biom, or '-')"
         )
 
     if not_matched_arg is not None:
         args_search.extend(["--notmatched", not_matched_arg])
 
-    if output_blast6 is not None:
-        args_search.extend(
-            [
-                "--userout",
-                output_blast6,
-                "--userfields",
-                "query+target+id+alnlen+mism+opens+qlo+qhi+tlo+thi+evalue+bits+caln",
-                "--output_no_hits",
-            ]
-        )
-    sg_proc = subprocess.Popen(args_search, stdin=stdin, stdout=stdout, stderr=stderr)
+    duckdb_proc = None
+    fifo_dir = None
+    fifo_path = None
 
+    # Optional BLAST6 → Parquet branch via DuckDB
+    if output_blast6 is not None:
+        if not output_blast6.endswith((".parquet", ".pq")):
+            raise ValueError(
+                f"Invalid output_blast6 extension: {output_blast6!r} (use .parquet or .pq)"
+            )
+
+        # Create a dedicated temp dir and FIFO (safer than mktemp)
+        fifo_dir = tempfile.mkdtemp(prefix="blast6_fifo_")
+        fifo_path = os.path.join(fifo_dir, "stream.tsv")
+        os.mkfifo(fifo_path)
+
+        BLAST6_SCHEMA = [
+            ("query", "VARCHAR"),
+            ("target", "VARCHAR"),
+            ("id", "DOUBLE"),
+            ("alnlen", "BIGINT"),
+            ("mism", "BIGINT"),
+            ("opens", "BIGINT"),
+            ("qlo", "BIGINT"),
+            ("qhi", "BIGINT"),
+            ("tlo", "BIGINT"),
+            ("thi", "BIGINT"),
+            ("evalue", "DOUBLE"),
+            ("bits", "DOUBLE"),
+            ("caln", "VARCHAR"),
+        ]
+
+        # derived pieces
+        columns_sql = "{" + ",".join(f"'{n}':'{t}'" for n, t in BLAST6_SCHEMA) + "}"
+        cols_tail = ", ".join(
+            (
+                f"COALESCE(NULLIF(target, '*'), '{_sql_quote(unknown_name)}') AS target"
+                if name == "target"
+                else name
+            )
+            for name, _ in BLAST6_SCHEMA
+            if name != "query"
+        )
+
+        userfields = "+".join(n for n, _ in BLAST6_SCHEMA)  # for vsearch --userfields
+
+        args_search.extend(
+            ["--userout", fifo_path, "--userfields", userfields, "--output_no_hits"]
+        )
+
+        duckdb_sql = dedent(f"""
+            PRAGMA disable_progress_bar;
+            PRAGMA disable_print_progress_bar;
+            COPY (
+                SELECT
+                    regexp_replace(query, ';sample=[^;]*', '') AS query,
+                    {cols_tail},
+                    regexp_extract(query, ';sample=([^;]+)', 1) AS "group"
+                FROM read_csv(
+                    '{_sql_quote(fifo_path)}',
+                    delim='\\t',
+                    header=FALSE,
+                    columns={columns_sql}
+                )
+            ) TO '{_sql_quote(output_blast6)}'
+                (FORMAT PARQUET, COMPRESSION ZSTD);
+        """).strip()
+        # Start DuckDB BEFORE vsearch so the FIFO has a reader
+        duckdb_cmd = ["duckdb", "-cmd", ".mode trash", "-c", duckdb_sql]
+        duckdb_proc = subprocess.Popen(duckdb_cmd, stderr=stderr_stream)
+
+    # Launch vsearch
+    sg_proc = subprocess.Popen(
+        args_search, stdin=stdin, stdout=stdout, stderr=stderr_stream
+    )
+
+    # Feed data when stdin is PIPE
     if stdin is subprocess.PIPE:
         if isinstance(input_fastq, str):
             comm_input = input_fastq.encode()
         elif isinstance(input_fastq, bytes):
             comm_input = input_fastq
         else:
-            # If input_fastq is a file-like object, we shouldn't reach here
-            # because _decide_io_arg would have set stdin to input_fastq, not PIPE
             raise TypeError(
                 f"Expected input_fastq to be str or bytes when stdin is PIPE, got {type(input_fastq)}"
             )
     else:
         comm_input = None
 
-    sg_proc_out, sg_proc_err = sg_proc.communicate(comm_input)
+    sg_stdout, _ = sg_proc.communicate(comm_input)
+
+    # Wait for DuckDB if we started it
+    try:
+        if duckdb_proc is not None:
+            rc_duck = duckdb_proc.wait()
+            if rc_duck != 0:
+                raise RuntimeError(
+                    f"DuckDB conversion failed with return code {rc_duck}"
+                )
+    finally:
+        if fifo_path and os.path.exists(fifo_path):
+            try:
+                os.remove(fifo_path)
+            except OSError:
+                pass
+        if fifo_dir and os.path.isdir(fifo_dir):
+            try:
+                os.rmdir(fifo_dir)
+            except OSError:
+                pass
 
     if stdout is subprocess.PIPE:
-        return sg_proc_out.decode()
+        return sg_stdout.decode()
+    return None
 
 
 def csr_vappend(a: ss.csr_matrix, b: ss.csr_matrix) -> ss.csr_matrix:
@@ -799,7 +879,7 @@ def search_global_add_unknown(
         raise ValueError(f"Query fastq file {input_fastq} does not exist")
     if output_path is None:
         output_dir = os.path.dirname(input_fastq)
-        output_tsv = os.path.join(output_dir, "unoise3_zotu.biom")
+        output_path = os.path.join(output_dir, "unoise3_zotu.biom")
     else:
         output_dir = os.path.dirname(output_path)
         os.makedirs(output_dir, exist_ok=True)
@@ -810,6 +890,7 @@ def search_global_add_unknown(
         zotu_fasta,
         output_tsv=output_path,
         output_blast6=output_blast6,
+        unknown_name=unknown_name,
         not_matched_fasta=output_not_matched,
         id_=id_,
         num_threads=num_threads,
