@@ -204,10 +204,11 @@ def _heatmap(
             cbar_kws=cbar_kws,
             vmax=vmax,
             vmin=vmin,
-            square=True,
+            # square=True,
             annot=df_iso,
             fmt="",
         )
+        ax.set_aspect(0.5)
 
         if df_iso is not None:
             sns.heatmap(
@@ -441,6 +442,8 @@ def _barplot_with_whisker_strip(
                 10 ** (np.floor(np.log10(min(values)))),
                 10 ** (np.ceil(np.log10(max(values)))),
             )
+    else:
+        axs[0].set_ylim(0, None)
 
 
 def _calc_alpha_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -897,7 +900,7 @@ def get_abundance_plot(
 
                     taxon2color = get_taxon2color(
                         df_tax_filtered,
-                        levels_of_interest=["order", "phylum"],
+                        levels_of_interest=["phylum"],
                         target_level=level,
                     )
                     taxon2alpha = {
@@ -1021,7 +1024,7 @@ def get_abundance_plot(
 
                     taxon2color = get_taxon2color(
                         df_tax_filtered,
-                        levels_of_interest=["order", "phylum"],
+                        levels_of_interest=["phylum"],
                         target_level=level,
                     )
                     taxon2alpha = {
@@ -1048,7 +1051,7 @@ def get_abundance_plot(
                     axs_heatmap=axs,
                     axs_dend=axs_dend,
                     # cmap=sns.cubehelix_palette(as_cmap=True),
-                    cmap="summer",
+                    cmap=cmap,
                     linkage_row=linkage_row,
                     linkage_row_legend=taxon2color,
                     vmax=np.log10(vmax),
@@ -1075,7 +1078,11 @@ def get_alpha_diversity_plot(
     rarefying_key: None | str = None,
     plot_strip: bool = False,
     metrics: list[str] | None = None,
-) -> dict[str, dict[str, Figure]]:
+    ret_metrics: bool = False,
+) -> (
+    dict[str, dict[str, Figure]]
+    | tuple[dict[str, dict[str, Figure]], dict[str, pd.DataFrame]]
+):
     if metrics is None:
         metrics = [
             "shannon",
@@ -1152,6 +1159,7 @@ def get_alpha_diversity_plot(
     wspace = 0.15
     width = df_meta.groupby([sample_group_key, rep_group_key]).ngroups / 3 + 1.5
     figs = defaultdict(dict)
+    df_metrics_list = defaultdict(dict)
     for level in tax_levels:
         # no need for taxa qc, all taxa count
         res = _agg_along_axis(df_otu_count, df_tax[level], axis=1)
@@ -1161,6 +1169,7 @@ def get_alpha_diversity_plot(
             left_index=True,
             right_index=True,
         )
+        df_metrics_list[level] = meta_l
         _, groups = zip(*[i for i in meta_l.groupby(sample_group_key, sort=False)])
         title_prefix = f"{'ZOTU' if level == 'otu' else level.capitalize()}"
         for column_of_interest in metrics:
@@ -1169,7 +1178,7 @@ def get_alpha_diversity_plot(
             if rarefying_repeat > 1:
                 suptitle = f"{title} rarefied"
                 if rarefying_key is not None:
-                    suptitle += f" to reference"
+                    suptitle += " to reference"
                 else:
                     mantissa = f"{rarefying_value:.1e}"
                     base, exp = mantissa.split("e")
@@ -1226,7 +1235,10 @@ def get_alpha_diversity_plot(
     #     ylog=True,
     # )
     # figs["sequencing_depth"]["otu"] = fig
-    return figs
+    if ret_metrics:
+        return figs, df_metrics_list
+    else:
+        return figs
 
 
 def main():
