@@ -2,7 +2,10 @@ from typing import Annotated
 
 from cyclopts import App, Parameter
 
-from .basic import combine_trim_clip_pe as _combine_trim_clip_pe, combine_trim_merge_pe as _combine_trim_merge_pe
+from .basic import (
+    combine_trim_clip_pe as _combine_trim_clip_pe,
+    combine_trim_merge_pe as _combine_trim_merge_pe,
+)
 from .camii_isolates import isolate_150_preprocess as _isolate_150_preprocess
 from .rnatag_seq import rnatagseq_150_preprocess as _rnatagseq_150_preprocess
 from ..trim import resolve_input_path
@@ -22,14 +25,14 @@ def combine_trim_clip_pe(
     output_fastq_r2: Annotated[
         str, Parameter(name=["-o2", "--output2"], help="Output FASTQ for read 2")
     ],
-    primer_set: Annotated[
-        str | None, Parameter(help="Primer set name")
-    ] = None,
+    primer_set: Annotated[str | None, Parameter(help="Primer set name")] = None,
     first_k: Annotated[
-        int | None, Parameter(name=["-k1", "--first-k1"], help="First k bases to keep from read 1")
+        int | None,
+        Parameter(name=["-k1", "--first-k1"], help="First k bases to keep from read 1"),
     ] = None,
     first_k_r2: Annotated[
-        int | None, Parameter(name=["-k2", "--first-k2"], help="First k bases to keep from read 2")
+        int | None,
+        Parameter(name=["-k2", "--first-k2"], help="First k bases to keep from read 2"),
     ] = None,
     min_length: Annotated[
         int, Parameter(name=["-l1", "--min-length1"], help="Minimum length for read 1")
@@ -40,9 +43,7 @@ def combine_trim_clip_pe(
     quality_trimming: Annotated[
         bool, Parameter(help="Enable quality trimming with fastp")
     ] = False,
-    cores: Annotated[
-        int, Parameter(help="Number of cores to use")
-    ] = 16,
+    cores: Annotated[int, Parameter(help="Number of cores to use")] = 16,
 ) -> None:
     return _combine_trim_clip_pe(
         input_fastq_dir=input_fastq_dir,
@@ -70,7 +71,10 @@ def isolate_150_preprocess(
         str, Parameter(name=["-rb", "--barcode-rev"], help="Reverse barcode FASTA")
     ],
     rename_pattern: Annotated[
-        str, Parameter(name=["-pt", "--rename-pattern"], help="Renaming pattern for output reads")
+        str,
+        Parameter(
+            name=["-pt", "--rename-pattern"], help="Renaming pattern for output reads"
+        ),
     ],
     output_fastq: Annotated[
         str, Parameter(name=["-o1", "--output1"], help="Output FASTQ for read 1")
@@ -79,14 +83,14 @@ def isolate_150_preprocess(
         str, Parameter(name=["-o2", "--output2"], help="Output FASTQ for read 2")
     ],
     # args for combine_trim_clip_pe
-    primer_set: Annotated[
-        str, Parameter(help="Primer set name")
-    ],
+    primer_set: Annotated[str, Parameter(help="Primer set name")],
     first_k: Annotated[
-        int | None, Parameter(name=["-k1", "--first-k1"], help="First k bases to keep from read 1")
+        int | None,
+        Parameter(name=["-k1", "--first-k1"], help="First k bases to keep from read 1"),
     ] = None,
     first_k_r2: Annotated[
-        int | None, Parameter(name=["-k2", "--first-k2"], help="First k bases to keep from read 2")
+        int | None,
+        Parameter(name=["-k2", "--first-k2"], help="First k bases to keep from read 2"),
     ] = None,
     min_length: Annotated[
         int, Parameter(name=["-l1", "--min-length1"], help="Minimum length for read 1")
@@ -98,9 +102,7 @@ def isolate_150_preprocess(
     quality_trimming: Annotated[
         bool, Parameter(help="Enable quality trimming with fastp")
     ] = False,
-    cores: Annotated[
-        int, Parameter(help="Number of cores to use")
-    ] = 16,
+    cores: Annotated[int, Parameter(help="Number of cores to use")] = 16,
 ) -> None:
     barcode_fwd_fasta = resolve_input_path(barcode_fwd_fasta)
     barcode_rev_fasta = resolve_input_path(barcode_rev_fasta)
@@ -130,14 +132,35 @@ def combine_trim_merge_pe(
     output_fastq: Annotated[
         str, Parameter(name=["-o", "--output"], help="Output path for merged FASTQ")
     ],
-    min_length: Annotated[
-        int | None, Parameter(name="--min-length", help="Minimum required length after merging")
+    primer_set: Annotated[str | None, Parameter(help="Primer set name")] = None,
+    overlap_len_require: Annotated[
+        int | None,
+        Parameter(
+            name="--overlap-len-require",
+            help="Required overlap length for merging reads",
+        ),
     ] = None,
-    min_overlap: Annotated[
-        int | None, Parameter(name="--min-overlap", help="Minimum overlap length for merging reads")
+    overlap_diff_limit: Annotated[
+        int | None,
+        Parameter(
+            name="--overlap-diff-limit",
+            help="Maximum mismatches allowed in the overlap",
+        ),
+    ] = None,
+    overlap_diff_percent_limit: Annotated[
+        float | None,
+        Parameter(
+            name="--overlap-diff-percent-limit",
+            help="Maximum mismatch percentage allowed in the overlap",
+        ),
+    ] = None,
+    min_length: Annotated[
+        int | None,
+        Parameter(name="--min-length", help="Minimum required length after merging"),
     ] = None,
     cores: Annotated[
-        int, Parameter(name="--cores", help="Number of cores (threads) for fastp to use")
+        int,
+        Parameter(name="--cores", help="Number of cores (threads) for fastp to use"),
     ] = 8,
 ) -> None:
     """
@@ -146,8 +169,11 @@ def combine_trim_merge_pe(
     return _combine_trim_merge_pe(
         input_dir=input_dir,
         output_fastq=output_fastq,
+        primer_set=primer_set,
+        overlap_len_require=overlap_len_require,
+        overlap_diff_limit=overlap_diff_limit,
+        overlap_diff_percent_limit=overlap_diff_percent_limit,
         min_length=min_length,
-        min_overlap=min_overlap,
         cores=cores,
     )
 
@@ -155,17 +181,26 @@ def combine_trim_merge_pe(
 @app.command
 def rnatagseq_150_preprocess(
     input_: Annotated[
-        list[str], Parameter(name=["-i", "--input"], help="Input directory, glob, or list of FASTQ files.", consume_multiple=True)
+        list[str],
+        Parameter(
+            name=["-i", "--input"],
+            help="Input directory, glob, or list of FASTQ files.",
+            consume_multiple=True,
+        ),
     ],
     barcode_fasta: Annotated[
-        str, Parameter(name=["-b", "--barcode-fasta"], help="Barcode FASTA file for demultiplexing")
+        str,
+        Parameter(
+            name=["-b", "--barcode-fasta"], help="Barcode FASTA file for demultiplexing"
+        ),
     ],
     output_dir: Annotated[
-        str, Parameter(name=["-o", "--output-dir"], help="Directory to store processed outputs")
+        str,
+        Parameter(
+            name=["-o", "--output-dir"], help="Directory to store processed outputs"
+        ),
     ],
-    cores: Annotated[
-        int, Parameter(help="Number of CPU threads to use")
-    ] = 16,
+    cores: Annotated[int, Parameter(help="Number of CPU threads to use")] = 16,
 ) -> None:
     """
     Preprocess RNAtag-Seq 150bp reads by trimming, demultiplexing, and writing outputs.

@@ -29,6 +29,44 @@ dependencies = [
     "cyclopts>=3.22.3",  # automatic version detection
 ]
 
+# --- uv dependency groups ---
+[dependency-groups]
+test = [
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+]
+notebook = [
+    "ipykernel>=6.29.5",
+    "ipython>=9.3.0",
+    "ipywidgets>=8.1.7",
+]
+
+# Make tests available in local runs by default (useful for contributors)
+[tool.uv]
+default-groups = ["test"]
+package = true
+
+# --- keep pip extras for non-uv users ---
+[project.optional-dependencies]
+test = [
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+]
+notebook = [
+    "ipykernel>=6.29.5",
+    "ipython>=9.3.0",
+    "ipywidgets>=8.1.7",
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-v --tb=short --strict-markers -ra"
+testpaths = ["tests"]
+# keep as defaults: python_files, python_classes
+# python_functions = ["test*"]      # allow testCamelCase
+python_functions = ["test_*"]       # enforce underscore
+xfail_strict = true
+
 [project.scripts]
 "analysis.py" = "masato.analysis:main"
 "analysis_sintax.py" = "masato.analysis_sintax:main"

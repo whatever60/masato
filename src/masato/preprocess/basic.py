@@ -119,8 +119,44 @@ def combine_trim_merge_pe(
     input_dir: str,
     output_fastq: str,
     *,
+    primer_set: str | None = None,
+    overlap_len_require: int | None = None,
+    overlap_diff_limit: int | None = None,
+    overlap_diff_percent_limit: float | None = None,
     min_length: int | None = None,
-    min_overlap: int | None = None,
+    cores: int,
+) -> None:
+    if primer_set is not None:
+        return _combine_trim_merge_pe_with_primer(
+            input_dir=input_dir,
+            output_fastq=output_fastq,
+            primer_set=primer_set,
+            overlap_len_require=overlap_len_require,
+            overlap_diff_limit=overlap_diff_limit,
+            overlap_diff_percent_limit=overlap_diff_percent_limit,
+            min_length=min_length,
+            cores=cores,
+        )
+    else:
+        return _combine_trim_merge_pe(
+            input_dir=input_dir,
+            output_fastq=output_fastq,
+            overlap_len_require=overlap_len_require,
+            overlap_diff_limit=overlap_diff_limit,
+            overlap_diff_percent_limit=overlap_diff_percent_limit,
+            min_length=min_length,
+            cores=cores,
+        )
+
+
+def _combine_trim_merge_pe(
+    input_dir: str,
+    output_fastq: str,
+    *,
+    overlap_len_require: int | None = None,
+    overlap_diff_limit: int | None = None,
+    overlap_diff_percent_limit: float | None = None,
+    min_length: int | None = None,
     cores: int,
 ) -> None:
     """
@@ -134,15 +170,19 @@ def combine_trim_merge_pe(
     os.makedirs(fastp_output_dir, exist_ok=True)
 
     proc_args = ["fastp", "--stdin", "--interleaved_in", "--thread", str(cores)]
-    if min_length is None:  # Whatever fastp defaults to.
-        pass
-    # elif min_length == 0:
-    #     proc_args += ["--disable_length_filtering"]
-    else:
+    # These arguments will be whatever fastp defaults to if None.
+    if min_length is not None:
         proc_args += ["--length_required", str(min_length)]
-    if min_overlap is not None:
-        proc_args += ["--overlap_len_require", str(min_overlap)]
-    
+    if overlap_len_require is not None:
+        proc_args += ["--overlap_len_require", str(overlap_len_require)]
+    if overlap_diff_limit is not None:
+        proc_args += ["--overlap_diff_limit", str(overlap_diff_limit)]
+    if overlap_diff_percent_limit is not None:
+        proc_args += [
+            "--overlap_diff_percent_limit",
+            str(overlap_diff_percent_limit),
+        ]
+
     proc_args += [
         "--correction",
         "--cut_right",
@@ -178,4 +218,114 @@ def combine_trim_merge_pe(
     cat_fastq(input_dir, output_fp_r1=fastp_proc.stdin, output_fp_r2=fastp_proc.stdin)
 
     fastp_proc.stdin.close()
+    fastp_proc.wait()
+
+
+def _combine_trim_merge_pe_with_primer(
+    input_dir: str,
+    output_fastq: str,
+    *,
+    primer_set: str,
+    overlap_len_require: int | None = None,
+    overlap_diff_limit: int | None = None,
+    overlap_diff_percent_limit: float | None = None,
+    min_length: int | None = None,
+    cores: int,
+) -> None:
+    """
+    Given a directory of fastq files, perform renaming, quality trimming, adapter
+    trimming, length filtering, and merging using fastp. Fastp takes interleaved
+    input from stdin, to which we write the renamed and interleaved paired-end reads.
+    """
+    output_dir = os.path.dirname(output_fastq)
+    os.makedirs(output_dir, exist_ok=True)
+    output_dir_cutadapt = os.path.join(output_dir, "cutadapt")
+    fastp_output_dir = os.path.join(output_dir, "fastp")
+    os.makedirs(output_dir_cutadapt, exist_ok=True)
+    os.makedirs(fastp_output_dir, exist_ok=True)
+
+    a, A = get_primer_set(primer_set)
+    proc_args_cutadapt = [
+        "cutadapt",
+        "-e",
+        "0.15",
+        "-O",
+        "16",
+        "-g",
+        a,
+        "-G",
+        A,
+        "--untrimmed-output",
+        os.path.join(output_dir_cutadapt, "untrimmed_1.fq.gz"),
+        "--untrimmed-paired-output",
+        os.path.join(output_dir_cutadapt, "untrimmed_2.fq.gz"),
+        "--cores",
+        str(cores),
+        "--interleaved",
+        "-o",
+        "-",
+        "-",
+    ]
+
+    proc_args_fastp = ["fastp", "--stdin", "--interleaved_in", "--thread", str(cores)]
+    # These arguments will be whatever fastp defaults to if None.
+    if min_length is not None:
+        proc_args_fastp += ["--length_required", str(min_length)]
+    if overlap_len_require is not None:
+        proc_args_fastp += ["--overlap_len_require", str(overlap_len_require)]
+    if overlap_diff_limit is not None:
+        proc_args_fastp += ["--overlap_diff_limit", str(overlap_diff_limit)]
+    if overlap_diff_percent_limit is not None:
+        proc_args_fastp += [
+            "--overlap_diff_percent_limit",
+            str(overlap_diff_percent_limit),
+        ]
+
+    proc_args_fastp += [
+        "--correction",
+        "--cut_right",
+        "--merge",
+        "--merged_out",
+        output_fastq,
+        # --- Output for non-merged/failed reads ---
+        "--unpaired1",
+        os.path.join(fastp_output_dir, "unpaired_R1.fastq.gz"),
+        "--unpaired2",
+        os.path.join(fastp_output_dir, "unpaired_R2.fastq.gz"),
+        "--failed_out",
+        os.path.join(fastp_output_dir, "failed.fastq.gz"),
+        "--out1",
+        os.path.join(fastp_output_dir, "unmerged_R1.fastq.gz"),
+        "--out2",
+        os.path.join(fastp_output_dir, "unmerged_R2.fastq.gz"),
+        # --- Reporting ---
+        "--html",
+        os.path.join(fastp_output_dir, "report.html"),
+        "--json",
+        os.path.join(fastp_output_dir, "report.json"),
+    ]
+
+    print_command(proc_args_cutadapt)
+    print_command(proc_args_fastp)
+    cutadapt_trim_proc = subprocess.Popen(
+        proc_args_cutadapt,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    fastp_proc = subprocess.Popen(
+        proc_args_fastp,
+        stdin=cutadapt_trim_proc.stdout,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Assuming `cat_fastq` is defined elsewhere and handles writing to the process stdin
+    cat_fastq(
+        input_dir,
+        output_fp_r1=cutadapt_trim_proc.stdin,
+        output_fp_r2=cutadapt_trim_proc.stdin,
+    )
+    
+    cutadapt_trim_proc.stdin.close()
+    cutadapt_trim_proc.stdout.close()
     fastp_proc.wait()
