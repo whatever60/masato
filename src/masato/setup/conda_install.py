@@ -27,8 +27,6 @@ def main():
         "--file",
         requirement_file,
         "-c",
-        "defaults",
-        "-c",
         "bioconda",
         "-c",
         "conda-forge",
