@@ -27,9 +27,10 @@ def main():
         "--file",
         requirement_file,
         "-c",
-        "bioconda",
-        "-c",
         "conda-forge",
+        "-c",
+        "bioconda",
+        "--override-channels",
         "-y",
     ]
     print_command(args)
