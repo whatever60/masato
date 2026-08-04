@@ -10,14 +10,13 @@ from typing import TextIO, BinaryIO
 from io import BytesIO, StringIO
 from textwrap import dedent
 import tempfile
-from concurrent.futures import as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 import json
 from collections import defaultdict
 
 import numpy as np
 from scipy import sparse as ss
 import pandas as pd
-from loky import get_reusable_executor
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -535,7 +534,7 @@ def cluster_uparse(
 
 
 def unoise3(
-    input_fastq: str | TextIO | BinaryIO | bytes,
+    input_fastq: str | TextIO | BinaryIO | bytes | bytearray | memoryview,
     output_fasta: str | TextIO | BinaryIO | None,
     min_size: int,
     alpha: float = 2.0,
@@ -630,7 +629,7 @@ def unoise3(
     if stdin is subprocess.PIPE:
         if isinstance(input_fastq, str):
             qc_proc.communicate(input_fastq.encode())
-        elif isinstance(input_fastq, bytes):
+        elif isinstance(input_fastq, (bytes, bytearray, memoryview)):
             qc_proc.communicate(input_fastq)
         else:
             # If input_fastq is a file-like object, we shouldn't reach here
@@ -644,8 +643,8 @@ def unoise3(
 
 
 def search_global(
-    input_fastq: str | bytes | TextIO | BinaryIO | None,
-    zotu_fasta: str | TextIO | BinaryIO | None,
+    input_fastq: str | bytes | bytearray | memoryview | TextIO | BinaryIO | None,
+    zotu_fasta: str | bytes | bytearray | memoryview | TextIO | BinaryIO | None,
     output_tsv: str | TextIO | BinaryIO | None,
     output_blast6: str | None = None,
     unknown_name: str = "U-UNKNOWN",  # Used with output_blast6
@@ -683,6 +682,38 @@ def search_global(
     fastq_arg, stdin = _decide_io_arg(input_fastq)
     db_arg, stdin_db = _decide_io_arg(zotu_fasta)
     tsv_arg, stdout = _decide_io_arg(output_tsv)
+    db_fd = None
+    db_temp = None
+
+    # VSEARCH needs the query and database as separate inputs. If both are in
+    # memory, expose the small database through an anonymous RAM backed file
+    # descriptor and reserve stdin for the much larger query stream.
+    if stdin is not None and stdin_db is not None and isinstance(
+        zotu_fasta, (bytes, bytearray, memoryview)
+    ):
+        if hasattr(os, "memfd_create"):
+            db_fd = os.memfd_create("masato_zotu")
+        elif hasattr(os, "O_TMPFILE") and os.path.isdir("/dev/shm"):
+            try:
+                db_fd = os.open(
+                    "/dev/shm", os.O_RDWR | os.O_TMPFILE, mode=0o600
+                )
+            except OSError:
+                db_fd = None
+        if db_fd is not None:
+            remaining = memoryview(zotu_fasta)
+            while remaining:
+                written = os.write(db_fd, remaining)
+                remaining = remaining[written:]
+            os.lseek(db_fd, 0, os.SEEK_SET)
+            db_arg = f"/proc/self/fd/{db_fd}"
+        else:
+            # Portable fallback for systems without an anonymous file API.
+            db_temp = tempfile.NamedTemporaryFile()
+            db_temp.write(zotu_fasta)
+            db_temp.flush()
+            db_arg = db_temp.name
+        stdin_db = None
     if not_matched_fasta is None:
         not_matched_arg, stdout_not_matched = None, None
     else:
@@ -808,24 +839,36 @@ def search_global(
         duckdb_proc = subprocess.Popen(duckdb_cmd, stderr=stderr_stream)
 
     # Launch vsearch
-    sg_proc = subprocess.Popen(
-        args_search, stdin=stdin, stdout=stdout, stderr=stderr_stream
-    )
+    pass_fds = (db_fd,) if db_fd is not None else ()
+    try:
+        sg_proc = subprocess.Popen(
+            args_search,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr_stream,
+            pass_fds=pass_fds,
+        )
 
-    # Feed data when stdin is PIPE
-    if stdin is subprocess.PIPE:
-        if isinstance(input_fastq, str):
-            comm_input = input_fastq.encode()
-        elif isinstance(input_fastq, bytes):
-            comm_input = input_fastq
+        # Feed data when stdin is PIPE
+        if stdin is subprocess.PIPE:
+            if isinstance(input_fastq, str):
+                comm_input = input_fastq.encode()
+            elif isinstance(input_fastq, (bytes, bytearray, memoryview)):
+                comm_input = input_fastq
+            else:
+                raise TypeError(
+                    "Expected input_fastq to be str or bytes when stdin is PIPE, "
+                    f"got {type(input_fastq)}"
+                )
         else:
-            raise TypeError(
-                f"Expected input_fastq to be str or bytes when stdin is PIPE, got {type(input_fastq)}"
-            )
-    else:
-        comm_input = None
+            comm_input = None
 
-    sg_stdout, _ = sg_proc.communicate(comm_input)
+        sg_stdout, _ = sg_proc.communicate(comm_input)
+    finally:
+        if db_fd is not None:
+            os.close(db_fd)
+        if db_temp is not None:
+            db_temp.close()
 
     # Wait for DuckDB if we started it
     try:
@@ -931,7 +974,16 @@ def _add_unknown(
 
 
 def _decide_io_arg(
-    arg: str | bytes | TextIO | BinaryIO | subprocess.Popen | None,
+    arg: (
+        str
+        | bytes
+        | bytearray
+        | memoryview
+        | TextIO
+        | BinaryIO
+        | subprocess.Popen
+        | None
+    ),
 ) -> tuple[str, int | TextIO | BinaryIO | subprocess.Popen | None]:
     """Decides how an argument should be passed to a subprocess command.
 
@@ -943,7 +995,7 @@ def _decide_io_arg(
         arg: The input or output argument to process. It can be:
             - `str` (file path): Treated as a path on the filesystem.
             - `str` (multi-line): Treated as file content to be piped.
-            - `bytes`: Treated as file content to be piped.
+            - `bytes`, `bytearray`, or `memoryview`: Treated as content to be piped.
             - `None`: Represents a stream to be piped (e.g., for capturing stdout).
             - file-like object (`IO`, `gzip.GzipFile`, etc.): An existing stream.
 
@@ -957,7 +1009,7 @@ def _decide_io_arg(
     """
     if arg is None:  # Represents a PIPE for capturing output or providing no input
         return "-", subprocess.PIPE
-    elif isinstance(arg, bytes):  # In-memory bytes content
+    elif isinstance(arg, (bytes, bytearray, memoryview)):  # In-memory content
         return "-", subprocess.PIPE
     elif isinstance(arg, str):
         if "\n" in arg:  # In-memory string content
@@ -987,14 +1039,20 @@ def _decide_io_arg(
 
 
 def _workflow_one_sample(
-    seqs_sample: list[str] | list[bytes],
+    seqs_sample: bytes | bytearray | str | list[str] | list[bytes],
     min_size: int,
     alpha: float,
     prefix: str | None = None,
     search: bool = True,
+    num_qs: int | None = None,
 ) -> tuple[list[str], list[str], list[int]]:
-    num_qs = len(seqs_sample)
-    if isinstance(seqs_sample[0], bytes):
+    if isinstance(seqs_sample, (bytes, bytearray)):
+        input_fastq = seqs_sample
+    elif isinstance(seqs_sample, str):
+        input_fastq = seqs_sample
+    elif not seqs_sample:
+        input_fastq = b""
+    elif isinstance(seqs_sample[0], bytes):
         input_fastq = b"".join(seqs_sample)
     elif isinstance(seqs_sample[0], str):
         input_fastq = "".join(seqs_sample)
@@ -1002,10 +1060,12 @@ def _workflow_one_sample(
         raise TypeError(
             f"Expected seqs_sample to be a list of str or bytes, got {type(seqs_sample[0])}"
         )
-    db_fasta = tempfile.NamedTemporaryFile()
-    unoise3(
+    if num_qs is None:
+        newline = b"\n" if isinstance(input_fastq, (bytes, bytearray)) else "\n"
+        num_qs = input_fastq.count(newline) // 4
+    db_fasta = unoise3(
         input_fastq,
-        db_fasta.name,
+        None,
         min_size=min_size,
         alpha=alpha,
         relabel_prefix=prefix,
@@ -1013,11 +1073,12 @@ def _workflow_one_sample(
         num_threads=1,
         stderr=False,
     )
+    assert isinstance(db_fasta, str)
     try:
         zotus_name, zotus_seq = zip(
             *(
                 (record.id, str(record.seq))
-                for record in SeqIO.parse(db_fasta.name, "fasta")
+                for record in SeqIO.parse(StringIO(db_fasta), "fasta")
             )
         )
     except ValueError:
@@ -1026,7 +1087,11 @@ def _workflow_one_sample(
         zotus_name, zotus_seq = list(zotus_name), list(zotus_seq)
     if zotus_name and search:
         count_tsv = search_global(
-            input_fastq, db_fasta.name, None, num_threads=1, stderr=False
+            input_fastq,
+            db_fasta.encode(),
+            None,
+            num_threads=1,
+            stderr=False,
         )
         counts = pd.read_table(StringIO(count_tsv), index_col=0).iloc[:, 0].tolist()
         num_unknown = num_qs - sum(counts)
@@ -1040,7 +1105,6 @@ def _workflow_one_sample(
             zotus_name = ["#UNKNOWN"]
             zotus_seq = ["#UNKNOWN"]
             counts = [num_qs]
-    db_fasta.close()
     return zotus_name, zotus_seq, counts
 
 
@@ -1052,6 +1116,7 @@ def workflow_per_sample(
     prefix: str | None = None,
     num_threads: int = 8,
     search: bool = True,
+    max_buffer_gb: float = 8.0,
 ) -> None:
     """Split input fastq file by sample and run a separate unoise3 workflow for each
         sample, so that each sample has one set of ZOTUs and counts.
@@ -1071,81 +1136,107 @@ def workflow_per_sample(
     """
     from masato.utils import smart_open
 
+    if max_buffer_gb <= 0:
+        raise ValueError("max_buffer_gb must be greater than zero")
+    max_buffer_bytes = int(max_buffer_gb * 1024**3)
+
     current_sample = None
-    fastq_for_current_sample: list[bytes] = []
+    reads_for_current_sample = 0
     future2sample = {}
-    samples = set()
-    # sample2future = {}
+    pending_bytes = 0
+    samples = []
+    seen_samples = set()
     results = {}
 
-    executor = (
-        get_reusable_executor(max_workers=num_threads, kill_workers=True, reuse=False)
-        if num_threads > 1
-        else None
-    )
-    f: IO[str] = smart_open(input_fastq, "r")
-    # prog_bar = tqdm()
-    for i, entry in enumerate(zip(f, f, f, f)):
-        # Parse the header line to extract the sample name
-        header: str = entry[0]
-        sample_name = get_sample_name_from_header(header)
-        if sample_name != current_sample and fastq_for_current_sample:
-            if sample_name in samples:
-                raise ValueError(
-                    "Sequences in fastq file are not grouped by sample, found "
-                    f"{sample_name} both before {current_sample} and after it at the {i}th entry."
-                )
-            if executor:
-                future = executor.submit(
-                    _workflow_one_sample,
-                    fastq_for_current_sample,
-                    min_size,
-                    alpha,
-                    prefix,
-                    search,
-                )
-                future2sample[future] = current_sample
-                # sample2future[current_sample] = future
-            else:
-                results[current_sample] = _workflow_one_sample(
-                    fastq_for_current_sample, min_size, alpha, prefix, search
-                )
-            fastq_for_current_sample = []  # Reset for the next sample
-            samples.add(current_sample)
-            # prog_bar.update(1)
-        current_sample = sample_name
-        fastq_for_current_sample.append("".join(entry).encode())
-    f.close()
+    # Threads share each bytearray with the worker. Process workers would serialize and
+    # duplicate these potentially large buffers. Most work happens in VSEARCH child
+    # processes, so Python's GIL does not prevent useful concurrency here.
+    executor = ThreadPoolExecutor(max_workers=num_threads) if num_threads > 1 else None
+    progress = tqdm(desc="Processed samples", unit="sample") if executor else None
 
-    # Don't forget to process the last sample
-    samples.add(current_sample)
-    print(f"Found {len(samples)} samples.")
-    if fastq_for_current_sample:
+    sample_fastq = bytearray()
+
+    def collect_completed(completed) -> None:
+        nonlocal pending_bytes
+        for future in completed:
+            sample, buffer_size = future2sample.pop(future)
+            results[sample] = future.result()
+            pending_bytes -= buffer_size
+            if progress is not None:
+                progress.update(1)
+
+    def process_sample(sample: str, fastq: bytearray, num_reads: int) -> None:
+        nonlocal pending_bytes
         if executor:
+            # Keep both the task count and aggregate submitted payload bounded. A
+            # single sample larger than the byte budget is still allowed by itself.
+            while future2sample and (
+                len(future2sample) >= num_threads
+                or pending_bytes + len(fastq) > max_buffer_bytes
+            ):
+                completed, _ = wait(
+                    tuple(future2sample), return_when=FIRST_COMPLETED
+                )
+                collect_completed(completed)
             future = executor.submit(
                 _workflow_one_sample,
-                fastq_for_current_sample,
+                fastq,
                 min_size,
                 alpha,
                 prefix,
                 search,
+                num_reads,
             )
-            future2sample[future] = current_sample
-            # sample2future[current_sample] = future
-            for future in tqdm(as_completed(future2sample), total=len(future2sample)):
-                # start the task and save the future object
-                sample = future2sample[future]
-                results[sample] = future.result()
-            assert len(samples) == len(future2sample) == len(results)
-            results = {s: results[s] for s in samples}
+            future2sample[future] = (sample, len(fastq))
+            pending_bytes += len(fastq)
         else:
-            results[current_sample] = _workflow_one_sample(
-                fastq_for_current_sample, min_size, alpha, prefix, search
+            results[sample] = _workflow_one_sample(
+                fastq, min_size, alpha, prefix, search, num_reads
             )
-    # Assuming each task's result could be aggregated into a final result dictionary
-    # This step depends on how you implement the process_queue and task results handling
-    # You would collect results from each completed task here
-    # This could involve collecting returned values or reading from a shared resource
+
+    try:
+        with smart_open(input_fastq, "rb") as f:
+            for i, entry in enumerate(zip(f, f, f, f)):
+                header = entry[0].decode("ascii")
+                sample_name = get_sample_name_from_header(header)
+                if current_sample is None:
+                    current_sample = sample_name
+                elif sample_name != current_sample:
+                    if sample_name in seen_samples:
+                        raise ValueError(
+                            "Sequences in fastq file are not grouped by sample, found "
+                            f"{sample_name} both before {current_sample} and after it at the {i}th entry."
+                        )
+                    process_sample(
+                        current_sample,
+                        sample_fastq,
+                        reads_for_current_sample,
+                    )
+                    samples.append(current_sample)
+                    seen_samples.add(current_sample)
+                    current_sample = sample_name
+                    sample_fastq = bytearray()
+                    reads_for_current_sample = 0
+                sample_fastq.extend(b"".join(entry))
+                reads_for_current_sample += 1
+
+        if current_sample is None:
+            raise ValueError(f"No FASTQ records found in {input_fastq}")
+
+        process_sample(current_sample, sample_fastq, reads_for_current_sample)
+        samples.append(current_sample)
+        seen_samples.add(current_sample)
+        print(f"Found {len(samples)} samples.")
+
+        if executor:
+            collect_completed(as_completed(tuple(future2sample)))
+            assert len(samples) == len(results)
+            results = {sample: results[sample] for sample in samples}
+    finally:
+        if progress is not None:
+            progress.close()
+        if executor is not None:
+            executor.shutdown(wait=True)
     ext = os.path.splitext(output_path)[1]
     if ext == ".json":
         results = {s: {"zotus": z, "counts": c} for s, (_, z, c) in results.items()}
@@ -1708,6 +1799,12 @@ def main():
         "-t", "--num_threads", type=int, default=16, help="Number of threads to use"
     )
     workflow_per_sample_parser.add_argument(
+        "--max_buffer_gb",
+        type=float,
+        default=8.0,
+        help="Maximum combined size of submitted in-memory sample buffers in GiB",
+    )
+    workflow_per_sample_parser.add_argument(
         "--search",
         action="store_true",
         help="Search reads against ZOTU database",
@@ -1803,6 +1900,7 @@ def main():
             prefix=args.relabel_prefix,
             num_threads=args.num_threads,
             search=args.search,
+            max_buffer_gb=args.max_buffer_gb,
         )
     elif args.subcommand == "aggregate_samples":
         aggregate_samples(

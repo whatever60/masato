@@ -122,20 +122,24 @@ def smart_open(file_path: str, mode: str = "r") -> io.TextIOWrapper | gzip.GzipF
         IO[str] | IO[byte]: A file object or a gzip file object.
     """
 
-    if mode == "r":
+    if mode in {"r", "rt", "rb"}:
         with open(file_path, "rb") as f:
             first_two_bytes = f.read(2)
+        open_mode = "rb" if mode == "rb" else "rt"
         if first_two_bytes == b"\x1f\x8b":  # Magic number for gzip files
-            return gzip.open(file_path, "rt")
+            return gzip.open(file_path, open_mode)
         else:
-            return open(file_path, "r")
-    elif mode == "w":
+            return open(file_path, open_mode)
+    elif mode in {"w", "wt", "wb"}:
+        open_mode = "wb" if mode == "wb" else "wt"
         if file_path.endswith(".gz") or file_path.endswith(".gzip"):
-            return gzip.open(file_path, "wt")
+            return gzip.open(file_path, open_mode)
         else:
-            return open(file_path, "w")
+            return open(file_path, open_mode)
     else:
-        raise ValueError(f"Mode must be 'r' or 'w' if specified, getting {mode}.")
+        raise ValueError(
+            f"Mode must be 'r', 'rt', 'rb', 'w', 'wt', or 'wb', getting {mode}."
+        )
 
 
 OutputHandle = str | None | TextIO | BinaryIO

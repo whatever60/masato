@@ -1,5 +1,94 @@
 import pytest
 from pathlib import Path
+import json
+import time
+
+import masato.usearch_workflow as usearch_workflow
+
+
+def write_grouped_fastq(path, samples):
+    with open(path, "w") as fastq:
+        read_index = 0
+        for sample, count in samples:
+            for _ in range(count):
+                read_index += 1
+                fastq.write(
+                    f"@read{read_index};sample={sample}\nACGT\n+\nIIII\n"
+                )
+
+
+def fake_workflow_one_sample(
+    seqs_sample,
+    min_size,
+    alpha,
+    prefix=None,
+    search=True,
+    num_qs=None,
+):
+    assert isinstance(seqs_sample, bytearray)
+    return ["ZOTU1"], ["ACGT"], [num_qs]
+
+
+def test_workflow_per_sample_pipes_compact_memory_buffers(monkeypatch, tmp_path):
+    input_fastq = tmp_path / "grouped.fq"
+    output_json = tmp_path / "output.json"
+    write_grouped_fastq(input_fastq, [("sample1", 2), ("sample2", 3)])
+    observed = []
+
+    def record_sample(*args, **kwargs):
+        records = args[0].count(b"\n") // 4
+        observed.append((type(args[0]), args[-1], records))
+        return fake_workflow_one_sample(*args, **kwargs)
+
+    monkeypatch.setattr(usearch_workflow, "_workflow_one_sample", record_sample)
+    usearch_workflow.workflow_per_sample(
+        str(input_fastq),
+        str(output_json),
+        min_size=2,
+        alpha=2.0,
+        num_threads=1,
+    )
+
+    assert [(num_qs, records) for _, num_qs, records in observed] == [
+        (2, 2),
+        (3, 3),
+    ]
+    assert all(buffer_type is bytearray for buffer_type, _, _ in observed)
+    with open(output_json) as infile:
+        result = json.load(infile)
+    assert result["sample1"]["counts"] == [2]
+    assert result["sample2"]["counts"] == [3]
+
+
+def test_workflow_per_sample_bounds_pending_tasks(monkeypatch, tmp_path):
+    input_fastq = tmp_path / "grouped.fq"
+    output_json = tmp_path / "output.json"
+    write_grouped_fastq(
+        input_fastq, [(f"sample{i}", 2) for i in range(1, 7)]
+    )
+    wait_sizes = []
+    original_wait = usearch_workflow.wait
+
+    def slow_sample(*args, **kwargs):
+        time.sleep(0.02)
+        return fake_workflow_one_sample(*args, **kwargs)
+
+    def record_wait(futures, **kwargs):
+        wait_sizes.append(len(futures))
+        return original_wait(futures, **kwargs)
+
+    monkeypatch.setattr(usearch_workflow, "_workflow_one_sample", slow_sample)
+    monkeypatch.setattr(usearch_workflow, "wait", record_wait)
+    usearch_workflow.workflow_per_sample(
+        str(input_fastq),
+        str(output_json),
+        min_size=2,
+        alpha=2.0,
+        num_threads=2,
+    )
+
+    assert wait_sizes
+    assert max(wait_sizes) == 2
 
 
 @pytest.fixture
