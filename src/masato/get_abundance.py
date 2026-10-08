@@ -48,7 +48,7 @@ from masato.utils import read_table, read_table
 def _find_otus_by_taxon(df_tax: pd.DataFrame, taxon: str) -> list[str]:
     # index of df_tax are OTU numbers
     level, name = taxon.split(";")
-    return df_tax.query(f"{level} == '{name}'").index.tolist()
+    return df_tax.index[df_tax[level].eq(name)].tolist()
 
 
 def _calc_norm_factor(
